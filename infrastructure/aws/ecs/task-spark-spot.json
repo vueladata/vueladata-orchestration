@@ -1,0 +1,41 @@
+{
+  "family": "vueladata-spark-etl",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "2048",
+  "memory": "4096",
+  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/vueladata-spark-task-role",
+  "containerDefinitions": [
+    {
+      "name": "spark-etl",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/vueladata/spark-etl:latest",
+      "essential": true,
+      "environment": [
+        {
+          "name": "S3_DATA_LAKE_BUCKET",
+          "value": "${S3_DATA_LAKE_BUCKET}"
+        },
+        {
+          "name": "SPARK_DRIVER_MEMORY",
+          "value": "3g"
+        },
+        {
+          "name": "SPARK_SHUFFLE_PARTITIONS",
+          "value": "8"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/vueladata-spark-etl",
+          "awslogs-region": "${AWS_DEFAULT_REGION}",
+          "awslogs-stream-prefix": "spark-spot",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

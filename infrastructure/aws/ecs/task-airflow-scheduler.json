@@ -1,0 +1,107 @@
+{
+  "family": "vueladata-airflow-scheduler",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/vueladata-airflow-task-role",
+  "containerDefinitions": [
+    {
+      "name": "airflow-scheduler",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/vueladata/airflow:latest",
+      "essential": true,
+      "command": [
+        "scheduler"
+      ],
+      "environment": [
+        {
+          "name": "AIRFLOW__CORE__EXECUTOR",
+          "value": "CeleryExecutor"
+        },
+        {
+          "name": "AIRFLOW__CORE__AUTH_MANAGER",
+          "value": "airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager"
+        },
+        {
+          "name": "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN",
+          "value": "postgresql+psycopg2://${RDS_USER}:${RDS_PASSWORD}@${RDS_HOST}:5432/${RDS_DB}?options=-csearch_path%3Dairflow_db,public"
+        },
+        {
+          "name": "AIRFLOW__CELERY__RESULT_BACKEND",
+          "value": "db+postgresql://${RDS_USER}:${RDS_PASSWORD}@${RDS_HOST}:5432/${RDS_DB}?options=-csearch_path%3Dairflow_db,public"
+        },
+        {
+          "name": "AIRFLOW__CELERY__BROKER_URL",
+          "value": "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@${RABBITMQ_HOST}:5672//"
+        },
+        {
+          "name": "AIRFLOW__CORE__FERNET_KEY",
+          "value": "${AIRFLOW_FERNET_KEY}"
+        },
+        {
+          "name": "AIRFLOW__CORE__LOAD_EXAMPLES",
+          "value": "false"
+        },
+        {
+          "name": "AIRFLOW__CORE__EXECUTION_API_SERVER_URL",
+          "value": "http://vueladata-airflow-webserver.vueladata.local:8080/execution/"
+        },
+        {
+          "name": "AWS_DEFAULT_REGION",
+          "value": "${AWS_DEFAULT_REGION}"
+        },
+        {
+          "name": "S3_DATA_LAKE_BUCKET",
+          "value": "${S3_DATA_LAKE_BUCKET}"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/vueladata-airflow",
+          "awslogs-region": "${AWS_DEFAULT_REGION}",
+          "awslogs-stream-prefix": "scheduler",
+          "awslogs-create-group": "true"
+        }
+      }
+    },
+    {
+      "name": "airflow-dag-processor",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/vueladata/airflow:latest",
+      "essential": false,
+      "command": [
+        "dag-processor"
+      ],
+      "environment": [
+        {
+          "name": "AIRFLOW__CORE__EXECUTOR",
+          "value": "CeleryExecutor"
+        },
+        {
+          "name": "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN",
+          "value": "postgresql+psycopg2://${RDS_USER}:${RDS_PASSWORD}@${RDS_HOST}:5432/${RDS_DB}?options=-csearch_path%3Dairflow_db,public"
+        },
+        {
+          "name": "AIRFLOW__CORE__FERNET_KEY",
+          "value": "${AIRFLOW_FERNET_KEY}"
+        },
+        {
+          "name": "AIRFLOW__CORE__LOAD_EXAMPLES",
+          "value": "false"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/vueladata-airflow",
+          "awslogs-region": "${AWS_DEFAULT_REGION}",
+          "awslogs-stream-prefix": "dag-processor",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

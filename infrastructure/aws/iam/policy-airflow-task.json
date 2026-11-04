@@ -1,0 +1,60 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowS3DataLakeAccess",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::vueladata-datalake-dev-239700238526-us-east-1-an",
+        "arn:aws:s3:::vueladata-datalake-dev-239700238526-us-east-1-an/*"
+      ]
+    },
+    {
+      "Sid": "AllowECSRunTaskSparkSpot",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:RunTask",
+        "ecs:StopTask",
+        "ecs:DescribeTasks"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowIAMPassRoleForSparkTask",
+      "Effect": "Allow",
+      "Action": [
+        "iam:PassRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::239700238526:role/ecsTaskExecutionRole",
+        "arn:aws:iam::239700238526:role/vueladata-spark-task-role"
+      ]
+    },
+    {
+      "Sid": "AllowLambdaInvokeIngestors",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:InvokeFunction"
+      ],
+      "Resource": [
+        "arn:aws:lambda:us-east-1:239700238526:function:opensky-ingestor",
+        "arn:aws:lambda:us-east-1:239700238526:function:openmeteo-ingestor"
+      ]
+    },
+    {
+      "Sid": "AllowCloudWatchLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:*"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "family": "vueladata-rabbitmq",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "rabbitmq",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/vueladata/rabbitmq:3-management",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 5672,
+          "hostPort": 5672,
+          "protocol": "tcp"
+        },
+        {
+          "containerPort": 15672,
+          "hostPort": 15672,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "RABBITMQ_DEFAULT_USER",
+          "value": "${RABBITMQ_USER}"
+        },
+        {
+          "name": "RABBITMQ_DEFAULT_PASS",
+          "value": "${RABBITMQ_PASSWORD}"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/vueladata-rabbitmq",
+          "awslogs-region": "${AWS_DEFAULT_REGION}",
+          "awslogs-stream-prefix": "broker",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

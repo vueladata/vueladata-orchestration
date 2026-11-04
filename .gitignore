@@ -1,0 +1,107 @@
+# ==============================================================================
+# VuelaData - .gitignore
+# Reglas estrictas de exclusión de seguridad y archivos temporales
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. SECRETOS Y CREDENCIALES (CRÍTICO: NUNCA SUBIR A GITHUB)
+# ------------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+credentials
+credentials.json
+aws_credentials
+service_account.json
+*.pem
+*.key
+*.p12
+*.crt
+*.cert
+id_rsa
+id_rsa.pub
+
+# Credenciales y carpetas de AWS
+.aws/
+.aws*
+
+# Definiciones ECS renderizadas con credenciales locales/resueltas
+infrastructure/aws/ecs/resolved/
+infrastructure/**/resolved/
+
+# ------------------------------------------------------------------------------
+# 2. LOGS Y RUNTIME DE AIRFLOW
+# ------------------------------------------------------------------------------
+logs/
+*.log
+airflow.cfg
+airflow.db
+standalone_admin_password.txt
+
+# ------------------------------------------------------------------------------
+# 3. PYTHON, COMPILADOS Y ENTORNOS VIRTUALES
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+.env/
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ------------------------------------------------------------------------------
+# 4. TESTING, CACHÉS Y COBERTURA
+# ------------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.tox/
+.nox/
+
+# ------------------------------------------------------------------------------
+# 5. ARCHIVOS TEMPORALES Y SCRATCH
+# ------------------------------------------------------------------------------
+temp/
+tmp/
+temp_lambdas/
+scratch/
+
+# ------------------------------------------------------------------------------
+# 6. ARCHIVOS DEL SISTEMA OPERATIVO
+# ------------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+
+# ------------------------------------------------------------------------------
+# 7. DATOS MASIVOS (DATA LAKE RAW / SEEDS GIGANTES)
+# ------------------------------------------------------------------------------
+*.parquet
+data/
+downloads/
