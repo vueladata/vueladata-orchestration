@@ -1,0 +1,103 @@
+name: Deploy VuelaData Orchestration (Airflow & Spark) to AWS ECS
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  ECS_CLUSTER: vueladata-cluster
+  ECR_AIRFLOW_REPO: vueladata/airflow
+  ECR_SPARK_REPO: vueladata/spark-etl
+
+jobs:
+  validate:
+    name: Validate DAGs and Python Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check Python & DAG Syntax
+        run: |
+          echo "Validando sintaxis de DAGs de Airflow..."
+          python -m py_compile dags/*.py
+          echo "Validando sintaxis del pipeline de Spark ETL..."
+          python -m py_compile src/vueladata_etl/main.py
+          echo "Sintaxis validada exitosamente."
+
+  build-and-deploy:
+    name: Build, Push to ECR & Update ECS
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, Tag & Push Airflow Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo ">>> [1/2] Compilando imagen de Airflow 3.1.5 (linux/amd64)..."
+          docker build --platform linux/amd64 \
+            -t $ECR_REGISTRY/$ECR_AIRFLOW_REPO:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_AIRFLOW_REPO:latest \
+            -t $ECR_REGISTRY/$ECR_AIRFLOW_REPO:3.1.5 \
+            -f infrastructure/docker/airflow/Dockerfile .
+
+          echo "Subiendo imagen de Airflow a ECR..."
+          docker push $ECR_REGISTRY/$ECR_AIRFLOW_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_AIRFLOW_REPO:latest
+          docker push $ECR_REGISTRY/$ECR_AIRFLOW_REPO:3.1.5
+
+      - name: Build, Tag & Push Spark ETL Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo ">>> [2/2] Compilando imagen de Apache Spark ETL (linux/amd64)..."
+          docker build --platform linux/amd64 \
+            -t $ECR_REGISTRY/$ECR_SPARK_REPO:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_SPARK_REPO:latest \
+            -f infrastructure/docker/spark/Dockerfile .
+
+          echo "Subiendo imagen de Spark ETL a ECR..."
+          docker push $ECR_REGISTRY/$ECR_SPARK_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_SPARK_REPO:latest
+
+      - name: Deploy to Amazon ECS (Rolling Update Airflow Services)
+        run: |
+          echo "Actualizando servicios de Airflow en el clúster $ECS_CLUSTER..."
+          AIRFLOW_SERVICES=("vueladata-airflow-scheduler" "vueladata-airflow-webserver" "vueladata-airflow-worker")
+          
+          for SERVICE in "${AIRFLOW_SERVICES[@]}"; do
+            STATUS=$(aws ecs describe-services --cluster $ECS_CLUSTER --services $SERVICE --query 'services[0].status' --output text 2>/dev/null || echo "MISSING")
+            if [ "$STATUS" == "ACTIVE" ]; then
+              echo ">>> Actualizando servicio en caliente: $SERVICE"
+              aws ecs update-service --cluster $ECS_CLUSTER --service $SERVICE --force-new-deployment
+            else
+              echo ">>> Aviso: Servicio $SERVICE no está activo en ECS (estado: $STATUS), omitiendo."
+            fi
+          done
+          echo "Despliegue de orquestación completado con éxito."
+
