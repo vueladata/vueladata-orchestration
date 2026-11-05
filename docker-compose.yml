@@ -9,9 +9,9 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
 
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN:-postgresql+psycopg2://airflow:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
-    AIRFLOW__CELERY__RESULT_BACKEND: ${AIRFLOW__CELERY__RESULT_BACKEND:-db+postgresql://airflow:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
-    AIRFLOW__CELERY__BROKER_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672//
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN:-postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow_db}
+    AIRFLOW__CELERY__RESULT_BACKEND: ${AIRFLOW__CELERY__RESULT_BACKEND:-db+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow_db}
+    AIRFLOW__CELERY__BROKER_URL: ${AIRFLOW__CELERY__BROKER_URL:-amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672//}
 
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-local_dev_jwt_secret_change_me}
@@ -23,7 +23,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
 
     AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
-    S3_DATA_LAKE_BUCKET: ${S3_DATA_LAKE_BUCKET:-vueladata-datalake}
+    S3_DATA_LAKE_BUCKET: ${S3_DATA_LAKE_BUCKET:-vueladata-datalake-bronze}
 
   volumes:
     - ./dags:/opt/airflow/dags
@@ -39,14 +39,22 @@ x-airflow-common: &airflow-common
       condition: service_healthy
 
 services:
+  # ============================================================================
+  # 1. INFRAESTRUCTURA BASE: PostgreSQL & RabbitMQ
+  # ============================================================================
   postgres:
     image: postgres:16
+    container_name: vueladata-postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-vueladata}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres/init-db.sql:/docker-entrypoint-initdb.d/01-init-db.sql
+      - ../vueladata-database/schema_postgresql.sql:/docker-entrypoint-initdb.d/02-schema.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -57,11 +65,13 @@ services:
 
   rabbitmq:
     image: rabbitmq:3-management
+    container_name: vueladata-rabbitmq
     ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
       - "15672:15672"
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-rabbit_admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-VuelaData_Rabbit2026!}
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -70,6 +80,9 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # ============================================================================
+  # 2. STACK AIRFLOW 3.1.5 (Orquestación & Celery Executor)
+  # ============================================================================
   airflow-init:
     <<: *airflow-common
     entrypoint: /bin/bash
@@ -140,5 +153,89 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # ============================================================================
+  # 3. BACKEND API & WORKERS (F7: vueladata-api)
+  # ============================================================================
+  vueladata-api:
+    build:
+      context: ../vueladata-api
+      dockerfile: Dockerfile
+    container_name: vueladata-api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-vueladata}
+      PORT: 8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker-rds:
+    build:
+      context: ../vueladata-api
+      dockerfile: Dockerfile
+    container_name: vueladata-worker-rds
+    command: ["python", "-m", "worker_rds.main"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-vueladata}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-rabbit_admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-VuelaData_Rabbit2026!}
+      QUEUE_RDS: ${QUEUE_RDS:-q.rds_writer}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker-lake:
+    build:
+      context: ../vueladata-api
+      dockerfile: Dockerfile
+    container_name: vueladata-worker-lake
+    command: ["python", "-m", "worker_lake.main"]
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-rabbit_admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-VuelaData_Rabbit2026!}
+      QUEUE_LAKE: ${QUEUE_LAKE:-q.lake_writer}
+      AWS_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      S3_BUCKET_BRONZE: ${S3_DATA_LAKE_BUCKET:-vueladata-datalake-bronze}
+      LOCAL_LAKE_FALLBACK: "true"
+      LAKE_FLUSH_EVERY_N: 50
+      LAKE_FLUSH_EVERY_SECONDS: 60
+    volumes:
+      - datalake-bronze:/app/data/lake_bronze
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================================
+  # 4. STREAM PRODUCER (F4: Simulador Eventos OOOI)
+  # ============================================================================
+  stream-producer:
+    build:
+      context: ../vueladata-stream
+      dockerfile: Dockerfile
+    container_name: vueladata-stream-f4
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-rabbit_admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-VuelaData_Rabbit2026!}
+      QUEUE_NAME: ${QUEUE_NAME:-eventos_oooi_queue}
+      STREAM_DELAY_SECONDS: 1
+      TOTAL_VUELOS: 100
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: on-failure
+
 volumes:
   postgres-data:
+  datalake-bronze:
