@@ -215,6 +215,31 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  worker-notificaciones:
+    build:
+      context: ../vueladata-api
+      dockerfile: Dockerfile
+    container_name: vueladata-worker-notificaciones
+    command: ["python", "-m", "worker_notificaciones.main"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-vueladata}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-rabbit_admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-VuelaData_Rabbit2026!}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USUARIO: ${SMTP_USUARIO:-}
+      SMTP_CLAVE: ${SMTP_CLAVE:-}
+      SMTP_REMITENTE: ${SMTP_REMITENTE:-}
+      EMAIL_DESTINO_PRUEBAS: ${EMAIL_DESTINO_PRUEBAS:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
   # ============================================================================
   # 4. STREAM PRODUCER (F4: Simulador Eventos OOOI)
   # ============================================================================
