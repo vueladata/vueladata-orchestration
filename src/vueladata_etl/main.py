@@ -131,16 +131,16 @@ def main():
 
             # Leer cubos agregados generados en Gold y sincronizar
             try:
-                df_kpi_otp = spark.read.parquet(f"{path_config.gold_path}/kpi_otp_aerolineas")
+                df_kpi_otp = spark.read.parquet(f"{path_config.gold_path}/puntualidad_aerolineas")
                 filas_escritas += gold_loader.cargar_kpi_otp(df_kpi_otp)
             except Exception as e:
-                print(f"[!] Aviso lectura kpi_otp: {e}")
+                print(f"[!] Aviso lectura puntualidad_aerolineas: {e}")
 
             try:
-                df_kpi_prop = spark.read.parquet(f"{path_config.gold_path}/kpi_propagacion_flota")
+                df_kpi_prop = spark.read.parquet(f"{path_config.gold_path}/propagacion_flota")
                 filas_escritas += gold_loader.cargar_kpi_propagacion(df_kpi_prop)
             except Exception as e:
-                print(f"[!] Aviso lectura kpi_propagacion: {e}")
+                print(f"[!] Aviso lectura propagacion_flota: {e}")
 
         # 2. Registrar finalización exitosa en la base de datos de auditoría
         audit.registrar_fin(
