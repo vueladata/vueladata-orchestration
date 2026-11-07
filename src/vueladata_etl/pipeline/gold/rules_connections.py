@@ -24,8 +24,14 @@ class ConnectionsRuleEngine:
         """
         hubs_keys = list(HUBS_AEROPUERTOS.keys())
 
+        df = df_flights
+        if "retraso_llegada_min" not in df.columns:
+            df = df.withColumn("retraso_llegada_min", F.lit(0.0).cast(DoubleType()))
+        if "cancelado" not in df.columns:
+            df = df.withColumn("cancelado", F.lit(0))
+
         # Filtrar vuelos que arriban a un Hub
-        df_hubs = df_flights.filter(F.col("aeropuerto_destino").isin(hubs_keys)) \
+        df_hubs = df.filter(F.col("aeropuerto_destino").isin(hubs_keys)) \
             .withColumn("retraso_llegada_val", F.coalesce(F.col("retraso_llegada_min").cast(DoubleType()), F.lit(0.0)))
 
         # Clasificación de la conexión
@@ -48,7 +54,10 @@ class ConnectionsRuleEngine:
             ) \
             .withColumn(
                 "tasa_perdida_conexiones_pct",
-                F.round((F.col("total_conexiones_perdidas") / F.col("total_conexiones_programadas")) * 100, 2)
+                F.when(
+                    F.col("total_conexiones_programadas") > 0,
+                    F.round((F.col("total_conexiones_perdidas") / F.col("total_conexiones_programadas")) * 100, 2)
+                ).otherwise(0.0)
             ) \
             .withColumn("fecha_actualizacion_utc", F.current_timestamp())
 

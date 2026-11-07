@@ -22,10 +22,23 @@ class DelayPropagationEngine:
         Evalúa vuelos consecutivos de una misma aeronave considerando el tiempo mínimo de rotación
         (45 min vuelos nacionales, 60 min vuelos internacionales).
         """
+        df_flota = df_flights
+        if "matricula_aeronave" not in df_flota.columns:
+            return df_flota
+
         # Filtrar solo vuelos con matrícula asignada
-        df_flota = df_flights.filter(
+        df_flota = df_flota.filter(
             F.col("matricula_aeronave").isNotNull() & (F.col("matricula_aeronave") != "")
         )
+
+        if "tipo_vuelo" not in df_flota.columns:
+            df_flota = df_flota.withColumn("tipo_vuelo", F.lit("NACIONAL"))
+
+        if "retraso_llegada_min" not in df_flota.columns:
+            df_flota = df_flota.withColumn("retraso_llegada_min", F.lit(0.0))
+
+        if "salida_programada_raw" not in df_flota.columns:
+            df_flota = df_flota.withColumn("salida_programada_raw", F.lit("0000"))
 
         # Asignar tiempo de rotación requerido según tipo de vuelo
         df_flota = df_flota.withColumn(

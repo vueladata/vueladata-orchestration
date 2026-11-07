@@ -19,8 +19,11 @@ class WeatherRuleEngine:
         Agrega las afectaciones meteorológicas por aeropuerto de origen:
         Evalúa minutos de demora por clima y determina los aeropuertos más vulnerables.
         """
-        df = df_flights \
-            .withColumn("retraso_clima_val", F.coalesce(F.col("retraso_clima_min").cast(DoubleType()), F.lit(0.0)))
+        df = df_flights
+        if "retraso_clima_min" in df.columns:
+            df = df.withColumn("retraso_clima_val", F.coalesce(F.col("retraso_clima_min").cast(DoubleType()), F.lit(0.0)))
+        else:
+            df = df.withColumn("retraso_clima_val", F.lit(0.0).cast(DoubleType()))
 
         df = df.withColumn(
             "es_afectado_clima",

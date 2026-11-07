@@ -20,13 +20,20 @@ class CausesRuleEngine:
         - Imputables: AEROLINEA, AERONAVE_TARDIA (Rotación)
         - No Imputables: CLIMA, SISTEMA_ATC, SEGURIDAD
         """
-        # Asegurar columnas numéricas de retraso por causa
-        df = df_flights \
-            .withColumn("m_aerolinea", F.coalesce(F.col("retraso_aerolinea_min").cast(DoubleType()), F.lit(0.0))) \
-            .withColumn("m_aeronave", F.coalesce(F.col("retraso_aeronave_tardia_min").cast(DoubleType()), F.lit(0.0))) \
-            .withColumn("m_clima", F.coalesce(F.col("retraso_clima_min").cast(DoubleType()), F.lit(0.0))) \
-            .withColumn("m_sistema", F.coalesce(F.col("retraso_sistema_atc_min").cast(DoubleType()), F.lit(0.0))) \
-            .withColumn("m_seguridad", F.coalesce(F.col("retraso_seguridad_min").cast(DoubleType()), F.lit(0.0)))
+        # Asegurar columnas numéricas de retraso por causa defensivamente
+        cause_map = {
+            "m_aerolinea": "retraso_aerolinea_min",
+            "m_aeronave": "retraso_aeronave_tardia_min",
+            "m_clima": "retraso_clima_min",
+            "m_sistema": "retraso_sistema_atc_min",
+            "m_seguridad": "retraso_seguridad_min",
+        }
+        df = df_flights
+        for alias, col_name in cause_map.items():
+            if col_name in df.columns:
+                df = df.withColumn(alias, F.coalesce(F.col(col_name).cast(DoubleType()), F.lit(0.0)))
+            else:
+                df = df.withColumn(alias, F.lit(0.0).cast(DoubleType()))
 
         # Generar registros desglosados mediante stack
         df_unpivoted = df.select(

@@ -29,9 +29,21 @@ class CompensationRuleEngine:
         if "ruta" not in df.columns:
             df = df.withColumn("ruta", F.concat(F.col("aeropuerto_origen"), F.lit(" - "), F.col("aeropuerto_destino")))
 
+        # Asegurar columnas numéricas necesarias de forma defensiva
+        for col_name in ["retraso_clima_min", "retraso_aerolinea_min", "retraso_aeronave_tardia_min", "retraso_llegada_min"]:
+            if col_name not in df.columns:
+                df = df.withColumn(col_name, F.lit(0.0).cast(DoubleType()))
+            else:
+                df = df.withColumn(col_name, F.coalesce(F.col(col_name).cast(DoubleType()), F.lit(0.0)))
+
+        if "cancelado" not in df.columns:
+            df = df.withColumn("cancelado", F.lit(0))
+        else:
+            df = df.withColumn("cancelado", F.coalesce(F.col("cancelado"), F.lit(0)))
+
         # Filtrar vuelos que ameritan compensación obligatoria
         df_comp = df.filter(
-            (F.col("cancelado") == 1) | (F.coalesce(F.col("retraso_llegada_min").cast(DoubleType()), F.lit(0.0)) >= COMPENSATION_THRESHOLD_DELAY_MINUTES)
+            (F.col("cancelado") == 1) | (F.col("retraso_llegada_min") >= COMPENSATION_THRESHOLD_DELAY_MINUTES)
         )
 
         # Identificar la causa predominante de la compensación

@@ -20,6 +20,25 @@ class FlightsCleaner:
             F.substring(F.lpad(F.col(col_hora_raw).cast("string"), 4, "0"), 1, 2).cast(IntegerType()),
             F.lit(12)
         )
+        cause_cols = [
+            "retraso_aerolinea_min",
+            "retraso_aeronave_tardia_min",
+            "retraso_clima_min",
+            "retraso_sistema_atc_min",
+            "retraso_seguridad_min"
+        ]
+        for col_name in cause_cols:
+            if col_name not in df.columns:
+                df = df.withColumn(col_name, F.lit(0.0).cast(DoubleType()))
+            else:
+                df = df.withColumn(col_name, F.coalesce(F.col(col_name).cast(DoubleType()), F.lit(0.0)))
+
+        if "fecha_vuelo" not in df.columns and "anio" in df.columns and "mes" in df.columns and "dia" in df.columns:
+            df = df.withColumn(
+                "fecha_vuelo",
+                F.to_date(F.concat_ws("-", F.col("anio"), F.lpad(F.col("mes").cast("string"), 2, "0"), F.lpad(F.col("dia").cast("string"), 2, "0")))
+            )
+
         return df \
             .withColumn("ruta", F.concat(F.col("aeropuerto_origen"), F.lit(" - "), F.col("aeropuerto_destino"))) \
             .withColumn(
@@ -63,6 +82,10 @@ class FlightsCleaner:
             .withColumn("retraso_clima_min", F.coalesce(F.col("WEATHER_DELAY").cast(DoubleType()), F.lit(0.0))) \
             .withColumn("retraso_sistema_atc_min", F.coalesce(F.col("AIR_SYSTEM_DELAY").cast(DoubleType()), F.lit(0.0))) \
             .withColumn("retraso_seguridad_min", F.coalesce(F.col("SECURITY_DELAY").cast(DoubleType()), F.lit(0.0))) \
+            .withColumn(
+                "fecha_vuelo",
+                F.to_date(F.concat_ws("-", F.col("anio"), F.lpad(F.col("mes").cast("string"), 2, "0"), F.lpad(F.col("dia").cast("string"), 2, "0")))
+            ) \
             .withColumn("tipo_vuelo", F.lit("NACIONAL")) \
             .withColumn("fuente", F.lit(FUENTE_F1_KAGGLE))
 
@@ -92,6 +115,11 @@ class FlightsCleaner:
             .withColumn("desviado", F.lit(0)) \
             .withColumn("retraso_salida_min", F.lit(0.0)) \
             .withColumn("retraso_llegada_min", F.lit(0.0)) \
+            .withColumn("retraso_aerolinea_min", F.lit(0.0).cast(DoubleType())) \
+            .withColumn("retraso_aeronave_tardia_min", F.lit(0.0).cast(DoubleType())) \
+            .withColumn("retraso_clima_min", F.lit(0.0).cast(DoubleType())) \
+            .withColumn("retraso_sistema_atc_min", F.lit(0.0).cast(DoubleType())) \
+            .withColumn("retraso_seguridad_min", F.lit(0.0).cast(DoubleType())) \
             .withColumn("tipo_vuelo", F.lit("NACIONAL")) \
             .withColumn("fuente", F.lit(FUENTE_F6_ROTACION))
 
@@ -119,6 +147,7 @@ class FlightsCleaner:
             .withColumn("anio", F.year(F.col("salida_programada_ts"))) \
             .withColumn("mes", F.month(F.col("salida_programada_ts"))) \
             .withColumn("dia", F.dayofmonth(F.col("salida_programada_ts"))) \
+            .withColumn("fecha_vuelo", F.to_date(F.col("salida_programada_ts"))) \
             .withColumn("retraso_salida_min", F.coalesce(
                 F.round((F.unix_timestamp("salida_real_ts") - F.unix_timestamp("salida_programada_ts")) / 60.0, 2),
                 F.lit(0.0)
@@ -127,6 +156,11 @@ class FlightsCleaner:
                 F.round((F.unix_timestamp("llegada_real_ts") - F.unix_timestamp("llegada_programada_ts")) / 60.0, 2),
                 F.lit(0.0)
             )) \
+            .withColumn("retraso_aerolinea_min", F.lit(0.0).cast(DoubleType())) \
+            .withColumn("retraso_aeronave_tardia_min", F.lit(0.0).cast(DoubleType())) \
+            .withColumn("retraso_clima_min", F.lit(0.0).cast(DoubleType())) \
+            .withColumn("retraso_sistema_atc_min", F.lit(0.0).cast(DoubleType())) \
+            .withColumn("retraso_seguridad_min", F.lit(0.0).cast(DoubleType())) \
             .withColumn("salida_programada_raw", F.col("salida_programada_utc").cast("string")) \
             .withColumn("llegada_programada_raw", F.col("llegada_programada_utc").cast("string")) \
             .withColumn("codigo_aerolinea", F.lit("VD")) \

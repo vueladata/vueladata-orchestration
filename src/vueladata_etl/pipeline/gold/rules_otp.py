@@ -19,7 +19,15 @@ class OtpRuleEngine:
         Aplica la regla RN-01 a nivel de registro:
         Un vuelo es puntual si es operado (no cancelado ni desviado) y su retraso de llegada <= 15 min.
         """
-        return df_flights.withColumn(
+        df = df_flights
+        if "retraso_llegada_min" not in df.columns:
+            df = df.withColumn("retraso_llegada_min", F.lit(0.0).cast(DoubleType()))
+        if "cancelado" not in df.columns:
+            df = df.withColumn("cancelado", F.lit(0))
+        if "desviado" not in df.columns:
+            df = df.withColumn("desviado", F.lit(0))
+
+        return df.withColumn(
             "retraso_llegada_val",
             F.coalesce(F.col("retraso_llegada_min").cast(DoubleType()), F.lit(0.0))
         ).withColumn(
