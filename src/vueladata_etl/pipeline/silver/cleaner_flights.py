@@ -14,12 +14,30 @@ class FlightsCleaner:
     """Estandariza datasets heterogéneos de vuelos (Kaggle F1 y Rotación F6) a un modelo canónico Silver."""
 
     @staticmethod
+    def _asignar_franja_y_ruta(df: DataFrame, col_hora_raw: str = "salida_programada_raw") -> DataFrame:
+        """Calcula de forma estandarizada la ruta comercial y la franja horaria."""
+        hora_int = F.coalesce(
+            F.substring(F.lpad(F.col(col_hora_raw).cast("string"), 4, "0"), 1, 2).cast(IntegerType()),
+            F.lit(12)
+        )
+        return df \
+            .withColumn("ruta", F.concat(F.col("aeropuerto_origen"), F.lit(" - "), F.col("aeropuerto_destino"))) \
+            .withColumn(
+                "franja_horaria",
+                F.when((hora_int >= 0) & (hora_int < 6), "1. Madrugada (00:00 - 05:59)")
+                .when((hora_int >= 6) & (hora_int < 12), "2. Mañana (06:00 - 11:59)")
+                .when((hora_int >= 12) & (hora_int < 18), "3. Tarde (12:00 - 17:59)")
+                .otherwise("4. Noche (18:00 - 23:59)")
+            )
+
+    @staticmethod
     def clean_f1_flights(df_raw: DataFrame) -> DataFrame:
         """
         Limpia y estandariza los 5.8 millones de registros de Kaggle F1.
         Mapea nombres en inglés a nomenclatura en español de VuelaData y convierte tipos.
+        Preserva desglose analítico de causas para imputabilidad (HU-31).
         """
-        return df_raw \
+        df = df_raw \
             .withColumnRenamed("YEAR", "anio") \
             .withColumnRenamed("MONTH", "mes") \
             .withColumnRenamed("DAY", "dia") \
@@ -40,8 +58,15 @@ class FlightsCleaner:
             .withColumn("desviado", F.coalesce(F.col("desviado").cast(IntegerType()), F.lit(0))) \
             .withColumn("retraso_salida_min", F.coalesce(F.col("retraso_salida_min").cast(DoubleType()), F.lit(0.0))) \
             .withColumn("retraso_llegada_min", F.coalesce(F.col("retraso_llegada_min").cast(DoubleType()), F.lit(0.0))) \
+            .withColumn("retraso_aerolinea_min", F.coalesce(F.col("AIRLINE_DELAY").cast(DoubleType()), F.lit(0.0))) \
+            .withColumn("retraso_aeronave_tardia_min", F.coalesce(F.col("LATE_AIRCRAFT_DELAY").cast(DoubleType()), F.lit(0.0))) \
+            .withColumn("retraso_clima_min", F.coalesce(F.col("WEATHER_DELAY").cast(DoubleType()), F.lit(0.0))) \
+            .withColumn("retraso_sistema_atc_min", F.coalesce(F.col("AIR_SYSTEM_DELAY").cast(DoubleType()), F.lit(0.0))) \
+            .withColumn("retraso_seguridad_min", F.coalesce(F.col("SECURITY_DELAY").cast(DoubleType()), F.lit(0.0))) \
             .withColumn("tipo_vuelo", F.lit("NACIONAL")) \
             .withColumn("fuente", F.lit(FUENTE_F1_KAGGLE))
+
+        return FlightsCleaner._asignar_franja_y_ruta(df)
 
     @staticmethod
     def clean_f6_itinerary(df_raw: DataFrame, filter_date: str = None) -> DataFrame:
@@ -78,7 +103,7 @@ class FlightsCleaner:
             else:
                 print(f"[*] Aviso: 0 vuelos F6 para '{filter_date}'. Procesando lote sintético completo disponible...")
 
-        return df
+        return FlightsCleaner._asignar_franja_y_ruta(df)
 
     @staticmethod
     def clean_rds_flights(df_raw: DataFrame, filter_date: str = None) -> DataFrame:
@@ -121,4 +146,4 @@ class FlightsCleaner:
             else:
                 print(f"[*] Aviso: 0 vuelos RDS para '{filter_date}'. Procesando lote completo disponible...")
 
-        return df
+        return FlightsCleaner._asignar_franja_y_ruta(df)

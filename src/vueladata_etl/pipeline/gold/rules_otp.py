@@ -60,3 +60,34 @@ class OtpRuleEngine:
                 )
             ) \
             .withColumn("fecha_actualizacion_utc", F.current_timestamp())
+
+    @staticmethod
+    def aggregate_kpi_otp_rutas_franjas(df_with_otp: DataFrame) -> DataFrame:
+        """
+        Genera el cubo analítico de puntualidad desagregado por Ruta, Aeropuerto, Franja y Mes (HU-31).
+        Responde: ¿Cuál es el OTP por ruta, aeropuerto, franja y mes?
+        """
+        df = df_with_otp
+        if "ruta" not in df.columns:
+            df = df.withColumn("ruta", F.concat(F.col("aeropuerto_origen"), F.lit(" - "), F.col("aeropuerto_destino")))
+        if "franja_horaria" not in df.columns:
+            df = df.withColumn("franja_horaria", F.lit("2. Mañana (06:00 - 11:59)"))
+
+        return df.groupBy("anio", "mes", "codigo_aerolinea", "aeropuerto_origen", "aeropuerto_destino", "ruta", "franja_horaria") \
+            .agg(
+                F.count("*").alias("total_vuelos_programados"),
+                F.sum("es_cancelado").alias("total_vuelos_cancelados"),
+                F.sum("es_desviado").alias("total_vuelos_desviados"),
+                F.sum("es_operado").alias("total_vuelos_operados"),
+                F.sum("es_puntual_otp").alias("total_vuelos_puntuales"),
+                F.avg("retraso_llegada_val").alias("promedio_retraso_llegada_min"),
+                F.avg("retraso_salida_min").alias("promedio_retraso_salida_min")
+            ) \
+            .withColumn(
+                "tasa_otp_porcentaje",
+                F.round(
+                    (F.col("total_vuelos_puntuales") / F.when(F.col("total_vuelos_operados") > 0, F.col("total_vuelos_operados")).otherwise(1)) * 100,
+                    2
+                )
+            ) \
+            .withColumn("fecha_actualizacion_utc", F.current_timestamp())

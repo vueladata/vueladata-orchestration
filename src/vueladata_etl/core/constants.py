@@ -40,6 +40,29 @@ TABLE_ERROR_QUARANTINE = "pipeline_error_quarantine"
 TABLE_FACT_VUELO = "fact_vuelo_analitico"
 TABLE_KPI_OTP = "kpi_otp_aerolinea_mensual"
 TABLE_KPI_PROPAGACION = "kpi_propagacion_flota"
+TABLE_KPI_OTP_RUTAS = "kpi_otp_rutas_franjas"
+TABLE_KPI_CAUSAS = "kpi_causas_retraso"
+TABLE_KPI_COMPENSACIONES = "kpi_compensaciones_costo"
+TABLE_KPI_CONEXIONES = "kpi_conexiones_hubs"
+TABLE_KPI_CLIMA = "kpi_retrasos_clima_aeropuertos"
+
+# ── Reglas de Negocio Adicionales (HU-31 / Dashboard Gold) ───────────────────
+# Umbral de Compensación Económica Obligatoria (minutos de demora o cancelación)
+COMPENSATION_THRESHOLD_DELAY_MINUTES = 180.0
+COMPENSATION_BASE_COP_PER_PASSENGER = 200000.0  # ~$50 USD / COP estándar por pasajero
+AVERAGE_PASSENGERS_PER_FLIGHT = 140
+
+# Aeropuertos Hub Principales
+HUBS_AEROPUERTOS = {
+    "BOG": "Bogotá - El Dorado (Hub Principal)",
+    "MDE": "Medellín - José María Córdova",
+    "CLO": "Cali - Alfonso Bonilla Aragón",
+    "ATL": "Atlanta Hartsfield-Jackson",
+    "ORD": "Chicago O'Hare",
+    "DFW": "Dallas Fort Worth",
+    "DEN": "Denver International",
+    "LAX": "Los Angeles International"
+}
 
 # ── Configuración de Conexión a Base de Datos ────────────────────────────────
 def obtener_url_postgres() -> str:
