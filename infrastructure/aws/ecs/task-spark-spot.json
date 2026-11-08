@@ -15,16 +15,16 @@
       "essential": true,
       "environment": [
         {
-          "name": "S3_DATA_LAKE_BUCKET",
-          "value": "${S3_DATA_LAKE_BUCKET}"
-        },
-        {
           "name": "SPARK_DRIVER_MEMORY",
           "value": "3g"
         },
         {
           "name": "SPARK_SHUFFLE_PARTITIONS",
           "value": "8"
+        },
+        {
+          "name": "AWS_DEFAULT_REGION",
+          "value": "${AWS_DEFAULT_REGION}"
         }
       ],
       "logConfiguration": {
@@ -35,7 +35,29 @@
           "awslogs-stream-prefix": "spark-spot",
           "awslogs-create-group": "true"
         }
-      }
+      },
+      "secrets": [
+        {
+          "name": "S3_DATA_LAKE_BUCKET",
+          "valueFrom": "/vueladata/dev/s3/bucket_name"
+        },
+        {
+          "name": "RDS_HOST",
+          "valueFrom": "/vueladata/dev/database/host"
+        },
+        {
+          "name": "RDS_USER",
+          "valueFrom": "/vueladata/dev/database/user"
+        },
+        {
+          "name": "RDS_PASSWORD",
+          "valueFrom": "/vueladata/dev/database/password"
+        },
+        {
+          "name": "RDS_DB",
+          "valueFrom": "/vueladata/dev/database/name"
+        }
+      ]
     }
   ]
 }

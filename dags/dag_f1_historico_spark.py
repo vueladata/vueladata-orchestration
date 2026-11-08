@@ -1,122 +1,50 @@
-"""
-DAG de Procesamiento Histórico (F1): Vuelos Kaggle (5.8M) en ECS Fargate Spot
-Cumple con la Historia de Usuario HU-26:
-- Frecuencia: schedule=None (Bajo demanda / Ejecución manual única).
-- Dispara el contenedor efímero de Apache Spark en AWS ECS Fargate Spot.
-- Procesa los 5.8 millones de vuelos históricos de Kaggle (F1) desde s3://.../bronze/f1_kaggle/
-  hacia las capas Silver y Gold calculando OTP (RN-01) y propagación (RN-08).
-"""
-
-from datetime import datetime, timedelta
+"""Spark batch on Fargate Spot; configuration and S3 checks run only at task time."""
 import os
+from datetime import datetime, timedelta, timezone
 
 from airflow.sdk import dag, task
-from airflow.providers.amazon.aws.operators.ecs import EcsRunTaskOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+from airflow.providers.amazon.aws.operators.ecs import EcsRunTaskOperator
+from vueladata_orchestration.config import spark_configuration
 
-S3_BUCKET = os.getenv("S3_DATA_LAKE_BUCKET", "vueladata-datalake-dev-239700238526-us-east-1-an")
-ECS_CLUSTER = os.getenv("ECS_CLUSTER_NAME", "vueladata-cluster")
-ECS_SUBNET = os.getenv("ECS_SUBNET_ID", "subnet-063e1dbea89657b96")
-ECS_SECURITY_GROUP = os.getenv("ECS_SECURITY_GROUP_ID", "sg-0c39aef51177c31de")
-AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+DEFAULT_ARGS = {"owner": "vueladata-dataeng", "retries": 2,
+                "retry_delay": timedelta(minutes=5), "depends_on_past": False}
 
-DEFAULT_ARGS = {
-    "owner": "vueladata-dataeng",
-    "depends_on_past": False,
-    "retries": 1,
-    "retry_delay": timedelta(minutes=10),
-}
+@dag(dag_id="dag_f1_historico_spark", schedule=None, start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+     catchup=False, max_active_runs=1, default_args=DEFAULT_ARGS,
+     render_template_as_native_obj=True, tags=["vueladata", "spark", "fargate-spot"])
+def pipeline():
+    @task(execution_timeout=timedelta(minutes=5))
+    def validar_entorno():
+        config = spark_configuration()
+        hook = S3Hook(aws_conn_id="aws_default")
+        for key in ['bronze/f1_kaggle/flights.csv', 'bronze/f1_kaggle/airlines.csv', 'bronze/f1_kaggle/airports.csv']:
+            exists = (hook.check_for_prefix(key, "/", bucket_name=config["bucket"])
+                      if key.endswith("/") else hook.check_for_key(key, bucket_name=config["bucket"]))
+            if not exists:
+                raise ValueError(f"Missing required S3 input: {key}")
+        return config
 
-
-@dag(
-    dag_id="dag_f1_historico_spark",
-    description="Procesamiento bajo demanda de 5.8M vuelos Kaggle en Fargate Spot",
-    default_args=DEFAULT_ARGS,
-    schedule=None,
-    start_date=datetime(2026, 1, 1),
-    catchup=False,
-    max_active_runs=1,
-    tags=["hu-26", "spark", "f1-kaggle", "fargate-spot", "historico"],
-)
-def dag_f1_historico_spark():
-
-    @task
-    def validar_archivos_f1_s3() -> dict:
-        """
-        Verifica que existan flights.csv, airlines.csv y airports.csv
-        en s3://<bucket>/bronze/f1_kaggle/ antes de disparar el cómputo de Spark.
-        """
-        archivos_requeridos = [
-            "bronze/f1_kaggle/flights.csv",
-            "bronze/f1_kaggle/airlines.csv",
-            "bronze/f1_kaggle/airports.csv"
-        ]
-        print(f"[*] Validando presencia del dataset F1 en {S3_BUCKET}...")
-
-        try:
-            s3_hook = S3Hook(aws_conn_id="aws_default")
-            faltantes = []
-            for key in archivos_requeridos:
-                if not s3_hook.check_for_key(key, bucket_name=S3_BUCKET):
-                    faltantes.append(key)
-
-            if faltantes:
-                print(f"[!] Advertencia: Archivos no encontrados en S3: {faltantes}")
-                return {"status": "MISSING_FILES", "missing": faltantes}
-
-            print("[+] Todos los archivos de F1 están presentes en S3 Bronze.")
-            return {"status": "READY"}
-        except Exception as e:
-            print(f"[!] Verificación omitida en entorno local sin credenciales AWS: {e}")
-            return {"status": "LOCAL_DEV_BYPASS"}
-
-    procesar_f1_en_fargate_spot = EcsRunTaskOperator(
+    config = validar_entorno()
+    spark = EcsRunTaskOperator(
         task_id="ejecutar_spark_f1_historico_spot",
-        cluster=ECS_CLUSTER,
-        task_definition="vueladata-spark-etl",
-        capacity_provider_strategy=[
-            {
-                "capacityProvider": "FARGATE_SPOT",
-                "weight": 1,
-                "base": 0
-            }
-        ],
-        network_configuration={
-            "awsvpcConfiguration": {
-                "subnets": [ECS_SUBNET],
-                "securityGroups": [ECS_SECURITY_GROUP],
-                "assignPublicIp": "DISABLED"
-            }
-        },
-        overrides={
-            "containerOverrides": [
-                {
-                    "name": "spark-etl",
-                    "command": [
-                        "--layer", "all",
-                        "--mode", "historical",
-                        "--bucket", S3_BUCKET,
-                        "--run-id", "{{ run_id }}",
-                        "--dag-id", "dag_f1_historico_spark"
-                    ]
-                }
-            ]
-        },
+        cluster="{{ ti.xcom_pull(task_ids='validar_entorno')['cluster'] }}",
+        task_definition="{{ ti.xcom_pull(task_ids='validar_entorno')['task_definition'] }}",
+        capacity_provider_strategy=[{"capacityProvider": "FARGATE_SPOT", "weight": 1}],
+        network_configuration="{{ ti.xcom_pull(task_ids='validar_entorno')['network'] }}",
+        overrides={"containerOverrides": [{
+            "name": "{{ ti.xcom_pull(task_ids='validar_entorno')['container'] }}",
+            "command": ["--layer", "all", "--mode", "historical", "--bucket",
+                        "{{ ti.xcom_pull(task_ids='validar_entorno')['bucket'] }}",
+                        "--date", "{{ ds }}", "--run-id", "{{ run_id }}", "--dag-id", "dag_f1_historico_spark"]
+        }]},
         awslogs_group="/ecs/vueladata-spark-etl",
-        awslogs_stream_prefix="spark-spot",
-        wait_for_completion=True,
-        aws_conn_id="aws_default",
-        region_name=AWS_REGION
+        awslogs_stream_prefix="spark-spot/spark-etl",
+        wait_for_completion=True, deferrable=False,
+        waiter_delay=15, waiter_max_attempts=120,
+        execution_timeout=timedelta(minutes=35),
+        aws_conn_id="aws_default", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
     )
+    config >> spark
 
-    @task
-    def fin_procesamiento_historico():
-        print("[+] Procesamiento histórico F1 completado exitosamente.")
-        print("[+] 5.8M registros procesados y consolidados en Silver y Gold.")
-        return "SUCCESS"
-
-    val = validar_archivos_f1_s3()
-    val >> procesar_f1_en_fargate_spot >> fin_procesamiento_historico()
-
-
-dag_f1_historico_spark()
+pipeline()

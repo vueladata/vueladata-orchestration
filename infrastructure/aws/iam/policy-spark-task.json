@@ -11,8 +11,8 @@
         "s3:DeleteObject"
       ],
       "Resource": [
-        "arn:aws:s3:::vueladata-datalake-dev-239700238526-us-east-1-an",
-        "arn:aws:s3:::vueladata-datalake-dev-239700238526-us-east-1-an/*"
+        "arn:aws:s3:::${S3_DATA_LAKE_BUCKET}",
+        "arn:aws:s3:::${S3_DATA_LAKE_BUCKET}/*"
       ]
     },
     {

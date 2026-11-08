@@ -1,10 +1,11 @@
 param (
-    [string]$BucketName = "vueladata-datalake-dev-239700238526-us-east-1-an",
+    [string]$BucketName = $env:S3_DATA_LAKE_BUCKET,
     [string]$DataLocalDir = "C:\Users\lmeji\Desktop\vueladata\data",
     [string]$FlightsCsvPath = "C:\Users\lmeji\Downloads\flights.csv"
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $BucketName) { throw "Set S3_DATA_LAKE_BUCKET" }
 
 Write-Host "=========================================================" -ForegroundColor Cyan
 Write-Host "Iniciando carga de datos a la capa S3 Bronze de VuelaData" -ForegroundColor Cyan

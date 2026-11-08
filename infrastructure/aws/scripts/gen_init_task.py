@@ -1,4 +1,5 @@
 import json
+import os
 
 with open('infrastructure/aws/rds/init_all_schemas.sql', 'r', encoding='utf-8') as f:
     sql = f.read()
@@ -37,8 +38,8 @@ data = {
     "launchType": "FARGATE",
     "networkConfiguration": {
         "awsvpcConfiguration": {
-            "subnets": ["subnet-063e1dbea89657b96"],
-            "securityGroups": ["sg-0c39aef51177c31de"],
+            "subnets": json.loads(os.environ["ECS_SUBNET_IDS"]),
+            "securityGroups": json.loads(os.environ["ECS_SECURITY_GROUP_IDS"]),
             "assignPublicIp": "DISABLED"
         }
     },

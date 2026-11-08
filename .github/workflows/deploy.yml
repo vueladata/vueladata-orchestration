@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - master
+  pull_request:
+    branches: [main, master]
   workflow_dispatch:
 
 env:
@@ -26,17 +28,24 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Check Python & DAG Syntax
+      - name: Build pinned Airflow test image
+        run: docker build -t vueladata-airflow-test -f infrastructure/docker/airflow/Dockerfile .
+      - name: Load DAGs and validate deployment contracts
         run: |
-          echo "Validando sintaxis de DAGs de Airflow..."
-          python -m py_compile dags/*.py
-          echo "Validando sintaxis del pipeline de Spark ETL..."
-          python -m py_compile src/vueladata_etl/main.py
-          echo "Sintaxis validada exitosamente."
+          mkdir -p reports
+          chmod 777 reports
+          docker run --rm --entrypoint bash -v "$PWD:/workspace" -w /workspace vueladata-airflow-test -c 'pip install pytest==8.4.2 && python -m pytest tests -v --junitxml=reports/pytest-dags.xml'
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: airflow-audit-tests
+          path: reports/pytest-dags.xml
 
   build-and-deploy:
     name: Build, Push to ECR & Update ECS
     needs: validate
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code

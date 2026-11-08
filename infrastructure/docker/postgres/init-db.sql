@@ -1,4 +1,2 @@
--- Inicialización de base de datos para Airflow en el contenedor Postgres compartido
+-- Owned by the initialization user (POSTGRES_USER).
 CREATE DATABASE airflow_db;
-GRANT ALL PRIVILEGES ON DATABASE airflow_db TO postgres;
-
