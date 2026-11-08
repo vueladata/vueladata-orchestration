@@ -6,7 +6,12 @@ deduplicación por clave de negocio y sobrescritura dinámica de particiones.
 """
 
 from typing import Optional
-from pyspark.sql import DataFrame
+from pyspark.sql import DataFrame, functions as F
+from pyspark.errors import AnalysisException
+from vueladata_etl.pipeline.silver.catalogs import airport_timezones, historical_timestamps
+from vueladata_etl.pipeline.silver.operational import enrich_flights, connection_rows
+from vueladata_etl.pipeline.gold.rules_weather import WeatherRuleEngine
+from vueladata_etl.core.persistence import replace_sources
 
 from vueladata_etl.core.config import PathConfig
 from vueladata_etl.core.audit import AuditManager
@@ -45,83 +50,65 @@ class SilverTransformer:
             print(f"[*] Silver: Leyendo y estandarizando F1 Kaggle desde {f1_path}...")
             df_f1_raw = self.reader.read_f1_flights(f1_path)
             df_flights = FlightsCleaner.clean_f1_flights(df_f1_raw)
+            airports = self.reader.read_f1_airports(f1_path)
+            airlines = self.reader.read_f1_airlines(f1_path).select(F.col("IATA_CODE").alias("codigo_aerolinea"), F.col("AIRLINE").alias("nombre_aerolinea"))
+            df_flights = historical_timestamps(df_flights, airport_timezones(airports))
+            df_flights = df_flights.join(F.broadcast(airlines), "codigo_aerolinea", "left")
 
-        # 2. Fuente F6 Rotación de Flota (sintético semanal)
-        if mode in ["daily", "all"]:
-            f6_path = f"{self.paths.bronze_path}/f6_rotacion"
-            print(f"[*] Silver: Leyendo y estandarizando F6 Rotación desde {f6_path}...")
-            try:
-                df_f6_raw = self.reader.read_f6_itinerary(f6_path)
-                df_f6_clean = FlightsCleaner.clean_f6_itinerary(df_f6_raw, filter_date)
-                if df_flights is None:
-                    df_flights = df_f6_clean
-                else:
-                    df_flights = df_flights.unionByName(df_f6_clean, allowMissingColumns=True)
-            except Exception as e:
-                print(f"[!] Advertencia F6: {e}")
-
-        # 3. Fuente RDS Operacional (extraída desde PostgreSQL operacional a S3 Bronze)
         if mode in ["daily", "all"]:
             rds_path = f"{self.paths.bronze_path}/rds_operacional"
-            print(f"[*] Silver: Leyendo y estandarizando Vuelos RDS desde {rds_path}...")
-            try:
-                df_rds_raw = self.reader.read_rds_flights(rds_path)
-                if df_rds_raw is not None and df_rds_raw.count() > 0:
-                    df_rds_clean = FlightsCleaner.clean_rds_flights(df_rds_raw, filter_date)
-                    if df_flights is None:
-                        df_flights = df_rds_clean
-                    else:
-                        df_flights = df_flights.unionByName(df_rds_clean, allowMissingColumns=True)
-            except Exception as e:
-                print(f"[!] Advertencia RDS Vuelos: {e}")
+            read = lambda table: self.reader.read_rds_table(rds_path, table, filter_date)
+            operational = FlightsCleaner.clean_rds_flights(enrich_flights(read))
+            weather = read("observacion_clima").join(F.broadcast(read("aeropuerto").select("id_aeropuerto", "codigo_iata")), "id_aeropuerto")
+            json_weather = self.reader.read_weather_observations(f"{self.paths.bronze_path}/events")
+            if json_weather is not None:
+                airport_codes = read("aeropuerto").select(F.col("id_aeropuerto").cast("string").alias("_airport_id"), "codigo_iata")
+                json_weather = json_weather.join(F.broadcast(airport_codes), F.col("id_aeropuerto") == F.col("_airport_id"), "left")
+                json_weather = json_weather.withColumn("codigo_iata", F.coalesce("codigo_iata", F.when(F.col("id_aeropuerto").rlike("^[A-Z]{3}$"), F.col("id_aeropuerto"))))
+                cols = ["codigo_iata", "fecha_hora_observacion_utc", "visibilidad_km", "velocidad_viento_kmh"]
+                weather = weather.select(*cols).unionByName(json_weather.select(*cols))
+            operational = WeatherRuleEngine.apply_weather_audit(operational, weather)
+            connections = connection_rows(read)
+            connections.write.mode("overwrite").option("compression", "snappy").parquet(f"{self.paths.silver_path}/conexiones")
+            f6 = FlightsCleaner.clean_f6_itinerary(self.reader.read_f6_itinerary(f"{self.paths.bronze_path}/f6_rotacion"))
+            # F6 is a schedule, not evidence that a flight arrived on time. Prefer
+            # the operational record if both refer to the same scheduled flight.
+            keys = ["numero_vuelo", "salida_programada_ts"]
+            f6 = f6.join(operational.select(*keys), keys, "left_anti")
+            current = operational.unionByName(f6, allowMissingColumns=True)
+            df_flights = current if df_flights is None else df_flights.unionByName(current, allowMissingColumns=True)
 
         # 4. Control de Calidad y Cuarentena de Errores
         if df_flights is not None:
-            df_validos, _ = FlightQualityValidator.validar_y_separar(
+            df_validos, rejected = FlightQualityValidator.validar_y_separar(
                 df_flights=df_flights,
                 id_ejecucion=id_ejecucion,
                 dag_id=dag_id,
                 audit_manager=self.audit
             )
 
-            output_dir = f"{self.paths.silver_path}/vuelos_silver"
-            print(f"[*] Persistiendo Vuelos Silver en Parquet de forma idempotente en {output_dir}...")
-            # Idempotencia: sobrescritura por partición (anio, mes)
-            df_validos.write.mode("overwrite") \
-                .partitionBy("anio", "mes") \
-                .parquet(output_dir)
-            print("[+] Silver Vuelos: Persistido exitosamente con control de calidad.")
-
-            return df_validos
+            # Full rejects in S3; the RDS audit only holds a bounded sample.
+            rejected.write.mode("overwrite").option("compression", "snappy").parquet(f"{self.paths.silver_path}/cuarentena_vuelos/{mode}")
+            keys = ["fuente", "codigo_aerolinea", "numero_vuelo", "fecha_vuelo", "aeropuerto_origen", "aeropuerto_destino", "salida_programada_raw"]
+            df_validos = df_validos.dropDuplicates(keys)
+            sources = (["F1_KAGGLE"] if mode == "historical" else
+                       ["F6_ROTACION", "RDS_OPERACIONAL"] if mode == "daily" else
+                       ["F1_KAGGLE", "F6_ROTACION", "RDS_OPERACIONAL"])
+            return replace_sources(df_validos, f"{self.paths.silver_path}/vuelos_silver", sources, self.paths.base_path)
 
         return None
 
     def process_events(self) -> None:
-        """
-        Procesa y persiste los eventos JSON en Silver garantizando idempotencia:
-        1. Deduplica por id_externo_evento.
-        2. Sobrescribe únicamente la partición de la fecha afectada.
-        """
         events_path = f"{self.paths.bronze_path}/events"
-
-        # 1. Eventos OOOI
-        try:
-            df_oooi_raw = self.reader.read_oooi_events(events_path)
-            df_oooi_clean = EventsCleaner.clean_oooi_events(df_oooi_raw)
-            if df_oooi_clean is not None and df_oooi_clean.count() > 0:
-                df_oooi_clean.write.mode("overwrite") \
-                    .partitionBy("fecha_particion") \
-                    .parquet(f"{self.paths.silver_path}/eventos_oooi")
-        except Exception as e:
-            print(f"[!] Aviso eventos OOOI: {e}")
-
-        # 2. Eventos de Compensaciones y Pagos
-        try:
-            df_pagos_raw = self.reader.read_payment_events(events_path)
-            df_pagos_clean = EventsCleaner.clean_payment_events(df_pagos_raw)
-            if df_pagos_clean is not None and df_pagos_clean.count() > 0:
-                df_pagos_clean.write.mode("overwrite") \
-                    .partitionBy("fecha_particion") \
-                    .parquet(f"{self.paths.silver_path}/eventos_pagos")
-        except Exception as e:
-            print(f"[!] Aviso eventos Pagos: {e}")
+        sources = [
+            (self.reader.read_oooi_events, EventsCleaner.clean_oooi_events, "eventos_oooi"),
+            (self.reader.read_payment_events, EventsCleaner.clean_payment_events, "eventos_pagos"),
+            (self.reader.read_weather_observations, EventsCleaner.clean_weather_observations, "observaciones_clima"),
+        ]
+        for read, clean, target in sources:
+            df = clean(read(events_path))
+            if df is not None:
+                df.write.mode("overwrite").option("partitionOverwriteMode", "static").option("compression", "snappy").partitionBy("fecha_particion").parquet(f"{self.paths.silver_path}/{target}")
+        positions = self.reader.read_opensky_events(events_path)
+        if positions is not None:
+            positions.dropDuplicates(["id_externo_posicion"]).write.mode("overwrite").option("compression", "snappy").parquet(f"{self.paths.silver_path}/posiciones_aeronaves")

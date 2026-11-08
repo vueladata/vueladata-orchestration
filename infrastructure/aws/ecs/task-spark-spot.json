@@ -25,6 +25,10 @@
         {
           "name": "AWS_DEFAULT_REGION",
           "value": "${AWS_DEFAULT_REGION}"
+        },
+        {
+          "name": "F6_TIMEZONE",
+          "value": "UTC"
         }
       ],
       "logConfiguration": {

@@ -34,7 +34,7 @@ jobs:
         run: |
           mkdir -p reports
           chmod 777 reports
-          docker run --rm --entrypoint bash -v "$PWD:/workspace" -w /workspace vueladata-airflow-test -c 'pip install pytest==8.4.2 && python -m pytest tests -v --junitxml=reports/pytest-dags.xml'
+          docker run --rm --entrypoint bash -v "$PWD:/workspace" -w /workspace vueladata-airflow-test -c 'pip install pytest==8.4.2 && python -m pytest tests/test_dags.py tests/test_deployment.py -v --junitxml=reports/pytest-dags.xml'
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
@@ -42,9 +42,28 @@ jobs:
           name: airflow-audit-tests
           path: reports/pytest-dags.xml
 
+  validate-spark:
+    name: Spark rules and immutable Gold contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Spark 3.5.1 image
+        run: docker build -t vueladata-spark-test -f infrastructure/docker/spark/Dockerfile .
+      - name: Run Spark acceptance tests
+        run: |
+          mkdir -p reports
+          chmod 777 reports
+          docker run --rm --user 0 --entrypoint bash -v "$PWD:/workspace" -w /workspace vueladata-spark-test -c 'python3 -m pip install pytest==8.3.5 && python3 -m pytest tests/spark -v --junitxml=reports/pytest-spark.xml'
+      - name: Upload Spark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spark-acceptance-tests
+          path: reports/pytest-spark.xml
+
   build-and-deploy:
     name: Build, Push to ECR & Update ECS
-    needs: validate
+    needs: [validate, validate-spark]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:

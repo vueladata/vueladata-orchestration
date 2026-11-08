@@ -92,3 +92,41 @@ vueladata-airflow/
 Completar los secretos de `.env.example` para ejecución local. En AWS, aprovisionar los parámetros `/vueladata/dev/` referenciados en `secrets` de las Task Definitions antes del despliegue; las conexiones de metadatos de Airflow deben apuntar a la base `airflow_db`.
 
 El CI ejecuta pytest con Airflow 3.1.5. Los resultados en `reports/` son temporales y están excluidos de Git y del contexto Docker.
+
+
+## Contrato Gold y ejecución del ETL
+
+Las siete tablas existentes de Power BI conservan sus nombres y tipos. Las pruebas
+`tests/spark/gold_contract.json` fijan su contrato anterior. Se agregan nueve salidas:
+`dim_fecha`, `dim_aeropuerto`, `dim_aerolinea`, `dim_aeronave`, `dim_causa`, `dim_ruta`,
+`fact_vuelos`, `fact_compensaciones` y `fact_conexiones`.
+
+Columnas adicionales en las tablas existentes:
+- `total_vuelos_sin_hora_llegada` en ambas tablas de puntualidad.
+- `total_vuelos_sin_valoracion` en `costos_compensacion`.
+- `total_conexiones_en_riesgo` en `conexiones_hubs`.
+- `total_vuelos_requieren_auditoria` en `impacto_clima`.
+
+El job diario extrae snapshots operacionales completos, preserva el histórico F1 en
+Silver y reconstruye Gold para no reemplazar un mes con un solo día ni conservar
+métricas obsoletas. Los IDs DOT sin correspondencia IATA y los aeropuertos sin zona
+horaria quedan en cuarentena Silver; no se inventan equivalencias. F1 no contiene
+reservas ni tarifas: los importes desconocidos permanecen nulos. Los costos COP no
+suman otras monedas. Los hechos de compensaciones tienen granularidad de vuelo y
+suma de tarifas de segmentos, no representan pagos efectuados.
+
+Antes de activar los DAGs en un ambiente existente, ejecutar:
+`airflow pools set gold_writer 1 "Single writer for Silver and Gold"`.
+Los contenedores init actualizados también crean este pool. Todos los escritores
+manuales deben respetar la exclusión mutua: Parquet sobre S3 no ofrece publicación
+transaccional de las dieciséis tablas. Una publicación fallida requiere reejecutar
+el lote antes de consumir resultados.
+
+La línea temporal del generador F6 se interpreta como UTC (`F6_TIMEZONE=UTC`).
+El ETL conserva las horas locales separadas de los timestamps UTC. La copia a RDS
+es opcional mediante `--sync-rds` y rechaza exportaciones superiores a 10.000 filas;
+ya no carga silenciosamente una muestra de 5.000 registros. El SLA de menos de
+30 minutos requiere medición en AWS con F1 completo; las pruebas locales no lo certifican.
+
+El CI ejecuta `tests/spark/` en Spark 3.5.1 y las pruebas Airflow por separado.
+Los reportes temporales permanecen excluidos de Git y Docker.

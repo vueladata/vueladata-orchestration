@@ -41,6 +41,7 @@ class FlightQualityValidator:
 
         # Flag 1: Identificadores obligatorios presentes
         cond_id_invalido = (
+            F.col("fecha_vuelo").isNull() |
             F.col("numero_vuelo").isNull() | 
             (F.col("numero_vuelo") == "") |
             F.col("codigo_aerolinea").isNull() |
@@ -55,19 +56,22 @@ class FlightQualityValidator:
                 F.col("llegada_programada_ts").isNotNull() &
                 (F.col("llegada_programada_ts") < F.col("salida_programada_ts"))
             )
-        elif "salida_programada_raw" in df_flights.columns and "llegada_programada_raw" in df_flights.columns:
-            cond_tiempo_incoherente = (
-                F.col("salida_programada_raw").isNotNull() &
-                F.col("llegada_programada_raw").isNotNull() &
-                (F.col("llegada_programada_raw") < F.col("salida_programada_raw"))
-            )
         else:
+            # HHMM cannot establish chronological order across midnight/timezones.
             cond_tiempo_incoherente = F.lit(False)
+        invalid_airport = (~F.col("aeropuerto_origen").rlike("^[A-Z]{3}$") |
+                           ~F.col("aeropuerto_destino").rlike("^[A-Z]{3}$"))
+
+        missing_timezone = F.lit(False)
+        if {"zona_origen", "zona_destino"} <= set(df_flights.columns):
+            missing_timezone = (F.col("fuente") == "F1_KAGGLE") & (F.col("zona_origen").isNull() | F.col("zona_destino").isNull())
 
         # Marcar motivo de rechazo
         df_evaluado = df_flights.withColumn(
             "motivo_rechazo",
             F.when(cond_id_invalido, F.lit("FALTA_CAMPOS_OBLIGATORIOS_IDENTIFICACION"))
+             .when(invalid_airport, F.lit("AEROPUERTO_DOT_O_IATA_INVALIDO"))
+             .when(missing_timezone, F.lit("AEROPUERTO_SIN_ZONA_HORARIA"))
              .when(cond_tiempo_incoherente, F.lit("INCOHERENCIA_CRONOLOGICA_LLEGADA_PREVIA_A_SALIDA"))
              .otherwise(F.lit(None))
         )
@@ -76,13 +80,7 @@ class FlightQualityValidator:
         df_rechazados = df_evaluado.filter(F.col("motivo_rechazo").isNotNull())
         df_validos = df_evaluado.filter(F.col("motivo_rechazo").isNull()).drop("motivo_rechazo")
 
-        total_rechazados = df_rechazados.count()
-        total_validos = df_validos.count()
-
-        print(f"[+] Control de Calidad: {total_validos:,} registros válidos | {total_rechazados:,} registros rechazados.")
-
-        # Si hay rechazados y tenemos el gestor de auditoría, guardarlos en cuarentena
-        if total_rechazados > 0 and audit_manager:
+        if audit_manager:
             # Tomar muestra o lote de rechazados para persistir en la tabla de errores
             registros_para_cuarentena = []
             for row in df_rechazados.limit(500).collect():

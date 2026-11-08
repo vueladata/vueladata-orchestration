@@ -40,6 +40,7 @@ def pipeline():
         }]},
         awslogs_group="/ecs/vueladata-spark-etl",
         awslogs_stream_prefix="spark-spot/spark-etl",
+        pool="gold_writer",
         wait_for_completion=True, deferrable=False,
         waiter_delay=15, waiter_max_attempts=120,
         execution_timeout=timedelta(minutes=35),
