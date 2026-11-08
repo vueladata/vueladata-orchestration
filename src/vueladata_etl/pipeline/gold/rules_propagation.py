@@ -26,11 +26,7 @@ class DelayPropagationEngine:
         if "matricula_aeronave" not in df_flota.columns:
             return df_flota
 
-        # Filtrar solo vuelos con matrícula asignada
-        df_flota = df_flota.filter(
-            F.col("matricula_aeronave").isNotNull() & (F.col("matricula_aeronave") != "")
-        )
-
+        # Preserve flights with missing tail numbers in OTP/financial totals.
         if "tipo_vuelo" not in df_flota.columns:
             df_flota = df_flota.withColumn("tipo_vuelo", F.lit("NACIONAL"))
 
@@ -50,9 +46,12 @@ class DelayPropagationEngine:
         )
 
         # Ventana analítica ordenada por aeronave y cronología
-        w_aircraft = Window.partitionBy("matricula_aeronave", "anio", "mes", "dia") \
-            .orderBy("salida_programada_raw", "numero_vuelo")
+        w_aircraft = Window.partitionBy("matricula_aeronave") \
+            .orderBy("anio", "mes", "dia", "salida_programada_raw", "numero_vuelo")
 
+        if "salida_programada_ts" in df_flota.columns:
+            w_aircraft = Window.partitionBy("matricula_aeronave").orderBy(
+                F.col("salida_programada_ts").asc_nulls_last(), "numero_vuelo")
         df_secuenciado = df_flota \
             .withColumn("prev_numero_vuelo", F.lag("numero_vuelo", 1).over(w_aircraft)) \
             .withColumn("prev_retraso_llegada", F.lag("retraso_llegada_min", 1).over(w_aircraft))
@@ -64,15 +63,15 @@ class DelayPropagationEngine:
         ).withColumn(
             "retraso_propagado_estimado",
             F.when(
-                F.col("retraso_heredado_previo") > 0,
+                (F.col("retraso_heredado_previo") > 0) & F.col("matricula_aeronave").isNotNull() & (F.col("matricula_aeronave") != ""),
                 F.greatest(
                     F.lit(0.0),
-                    F.col("retraso_heredado_previo") - (F.col("minutos_minimos_rotacion") * 0.25)
+                    F.col("retraso_heredado_previo") - F.col("minutos_minimos_rotacion")
                 )
             ).otherwise(0.0)
         ).withColumn(
             "es_retraso_propagado",
-            F.when(F.col("retraso_propagado_estimado") > 15.0, 1).otherwise(0)
+            F.when(F.col("retraso_propagado_estimado") > 0.0, 1).otherwise(0)
         )
 
         return df_propagado
@@ -80,7 +79,7 @@ class DelayPropagationEngine:
     @staticmethod
     def aggregate_propagation_kpi(df_propagado: DataFrame) -> DataFrame:
         """Genera métricas analíticas Gold de vulnerabilidad y efecto dominó por aeronave."""
-        return df_propagado.groupBy("anio", "mes", "matricula_aeronave") \
+        return df_propagado.filter(F.col("matricula_aeronave").isNotNull() & (F.col("matricula_aeronave") != "")).groupBy("anio", "mes", "matricula_aeronave") \
             .agg(
                 F.count("*").alias("total_vuelos_operados"),
                 F.sum("es_retraso_propagado").alias("total_vuelos_con_retraso_propagado"),

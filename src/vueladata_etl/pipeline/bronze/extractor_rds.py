@@ -11,7 +11,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, inspect
+from sqlalchemy import types as sqltypes
+from pyspark.sql import types as T
 
 from vueladata_etl.core.constants import (
     SCHEMA_OPERACIONAL,
@@ -73,13 +75,34 @@ class RdsBronzeExtractor:
             output_dir = f"{self.paths.bronze_path}/rds_operacional/{tabla}"
             print(f"[*] Persistiendo en S3 Bronze: {output_dir}...")
 
-            if total_filas > 0:
+            if self.spark is not None or total_filas > 0:
                 if self.spark is not None:
                     # Usar conector S3A nativo de Apache Spark (cero dependencias de fsspec)
-                    df_spark = df.copy()
-                    for c in df_spark.select_dtypes(include=['object']).columns:
-                        df_spark[c] = df_spark[c].astype(str)
-                    spark_df = self.spark.createDataFrame(df_spark)
+                    fields = []
+                    for column in inspect(self.engine).get_columns(tabla, schema=SCHEMA_OPERACIONAL):
+                        sql_type = column["type"]
+                        if isinstance(sql_type, sqltypes.Boolean): kind = T.BooleanType()
+                        elif isinstance(sql_type, sqltypes.Integer): kind = T.LongType()
+                        elif isinstance(sql_type, sqltypes.Numeric): kind = T.DoubleType()
+                        elif isinstance(sql_type, sqltypes.Float): kind = T.DoubleType()
+                        elif isinstance(sql_type, sqltypes.DateTime): kind = T.TimestampType()
+                        elif isinstance(sql_type, sqltypes.Date): kind = T.DateType()
+                        else: kind = T.StringType()
+                        fields.append(T.StructField(column["name"], kind, True))
+                    fields.append(T.StructField("fecha_proceso", T.StringType(), False))
+                    schema = T.StructType(fields)
+                    records = []
+                    for values in df.itertuples(index=False, name=None):
+                        row = []
+                        for value, field in zip(values, fields):
+                            if pd.isna(value): value = None
+                            elif isinstance(field.dataType, T.DoubleType): value = float(value)
+                            elif isinstance(field.dataType, T.LongType): value = int(value)
+                            elif isinstance(field.dataType, T.TimestampType): value = pd.Timestamp(value).to_pydatetime()
+                            elif isinstance(field.dataType, T.StringType): value = str(value)
+                            row.append(value)
+                        records.append(tuple(row))
+                    spark_df = self.spark.createDataFrame(records, schema=schema)
                     spark_df.write.mode("overwrite").partitionBy("fecha_proceso").parquet(output_dir)
                 else:
                     df.to_parquet(
@@ -97,15 +120,9 @@ class RdsBronzeExtractor:
                 "output_dir": output_dir,
                 "status": "SUCCESS"
             }
-        except Exception as e:
-            print(f"[!] Error extrayendo tabla {tabla} desde RDS: {e}")
-            logger.error(f"Fallo en extracción de {tabla}: {e}")
-            return {
-                "tabla": tabla,
-                "filas_extraidas": 0,
-                "error": str(e),
-                "status": "FAILED"
-            }
+        except Exception:
+            logger.exception("Operational extraction failed: %s", tabla)
+            raise
 
     def extraer_todo_operacional(self, fecha_proceso: Optional[str] = None) -> Dict[str, int]:
         """
@@ -120,38 +137,13 @@ class RdsBronzeExtractor:
 
         resultados = {}
 
-        # 1. Tablas de catálogo (dimensión base)
-        tablas_catalogo = ["aeropuerto", "aerolinea", "aeronave", "ruta"]
-        for t in tablas_catalogo:
-            res = self.extraer_tabla_a_bronze(tabla=t, fecha_proceso=fecha_proceso)
-            resultados[t] = res.get("filas_extraidas", 0)
-
-        # 2. Tablas transaccionales (incrementales por fecha si se especifica y no es "all")
-        col_vuelo = "salida_programada_utc" if (fecha_proceso and fecha_proceso != "all") else None
-        res_vuelos = self.extraer_tabla_a_bronze(
-            tabla="vuelo",
-            columna_fecha=col_vuelo,
-            fecha_proceso=fecha_proceso if fecha_proceso != "all" else None
-        )
-        resultados["vuelo"] = res_vuelos.get("filas_extraidas", 0)
-
-        # Fallback resiliente: Si no hay vuelos para la fecha exacta del día, extraer el lote completo disponible
-        if resultados["vuelo"] == 0 and fecha_proceso and fecha_proceso != "all":
-            print(f"[*] Aviso: 0 vuelos para '{fecha_proceso}'. Extrayendo lote operacional completo disponible...")
-            res_vuelos_all = self.extraer_tabla_a_bronze(tabla="vuelo", columna_fecha=None, fecha_proceso=fecha_proceso)
-            resultados["vuelo"] = res_vuelos_all.get("filas_extraidas", 0)
-
-        col_eventos = "fecha_hora_evento_utc" if (fecha_proceso and fecha_proceso != "all") else None
-        res_eventos = self.extraer_tabla_a_bronze(
-            tabla="evento_operacional",
-            columna_fecha=col_eventos,
-            fecha_proceso=fecha_proceso if fecha_proceso != "all" else None
-        )
-        resultados["evento_operacional"] = res_eventos.get("filas_extraidas", 0)
-
-        if resultados["evento_operacional"] == 0 and fecha_proceso and fecha_proceso != "all":
-            res_eventos_all = self.extraer_tabla_a_bronze(tabla="evento_operacional", columna_fecha=None, fecha_proceso=fecha_proceso)
-            resultados["evento_operacional"] = res_eventos_all.get("filas_extraidas", 0)
-
-        print("[+] Ingesta a S3 Bronze finalizada con éxito.")
+        # Complete operational snapshots avoid mixing copies from different days and
+        # include late events/corrections and connections across midnight.
+        tables = ["ciudad", "aeropuerto", "aerolinea", "aeronave", "ruta", "estado_vuelo",
+                  "vuelo", "evento_operacional", "observacion_clima", "causa",
+                  "incidencia_vuelo", "detalle_reserva", "conexion_itinerario",
+                  "tiempo_minimo_conexion", "evaluacion_conexion"]
+        for table in tables:
+            result = self.extraer_tabla_a_bronze(table, fecha_proceso=fecha_proceso)
+            resultados[table] = result["filas_extraidas"]
         return resultados

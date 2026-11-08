@@ -97,6 +97,7 @@ services:
       - -c
       - |
         airflow db migrate &&
+        airflow pools set gold_writer 1 "Single writer for Silver and Gold" &&
         (airflow users create \
           --username "$${AIRFLOW_ADMIN_USERNAME}" \
           --password "$${AIRFLOW_ADMIN_PASSWORD}" \

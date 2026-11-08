@@ -14,8 +14,9 @@
       "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/vueladata/airflow:latest",
       "essential": true,
       "command": [
-        "db",
-        "migrate"
+        "bash",
+        "-ec",
+        "airflow db migrate && airflow pools set gold_writer 1 \"Single writer for Silver and Gold\""
       ],
       "environment": [
         {

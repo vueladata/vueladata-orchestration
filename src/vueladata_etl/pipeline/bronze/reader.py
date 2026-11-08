@@ -4,6 +4,7 @@ Responsabilidad única (SRP): Cargar fuentes de datos sin inferencia de tipos de
 """
 
 from typing import Optional
+from pyspark.errors import AnalysisException
 from pyspark.sql import DataFrame, SparkSession
 
 from vueladata_etl.core.schemas import (
@@ -30,6 +31,8 @@ class BronzeReader:
         """Lee el dataset histórico de vuelos Kaggle (5.8M) con esquema explícito."""
         return self.spark.read \
             .option("header", "true") \
+            .option("enforceSchema", "false") \
+            .option("mode", "FAILFAST") \
             .schema(SCHEMA_F1_FLIGHTS) \
             .csv(f"{f1_dir}/flights.csv")
 
@@ -37,6 +40,8 @@ class BronzeReader:
         """Lee el catálogo de aerolíneas IATA."""
         return self.spark.read \
             .option("header", "true") \
+            .option("enforceSchema", "false") \
+            .option("mode", "FAILFAST") \
             .schema(SCHEMA_F1_AIRLINES) \
             .csv(f"{f1_dir}/airlines.csv")
 
@@ -44,6 +49,8 @@ class BronzeReader:
         """Lee el catálogo de aeropuertos de Kaggle."""
         return self.spark.read \
             .option("header", "true") \
+            .option("enforceSchema", "false") \
+            .option("mode", "FAILFAST") \
             .schema(SCHEMA_F1_AIRPORTS) \
             .csv(f"{f1_dir}/airports.csv")
 
@@ -51,6 +58,8 @@ class BronzeReader:
         """Lee el itinerario semanal sintético de rotación de flota."""
         return self.spark.read \
             .option("header", "true") \
+            .option("enforceSchema", "false") \
+            .option("mode", "FAILFAST") \
             .schema(SCHEMA_F6_ITINERARY) \
             .csv(f"{f6_dir}/synthetic_weekly_itinerary.csv")
 
@@ -58,6 +67,8 @@ class BronzeReader:
         """Lee el catálogo de aeronaves y capacidades."""
         return self.spark.read \
             .option("header", "true") \
+            .option("enforceSchema", "false") \
+            .option("mode", "FAILFAST") \
             .schema(SCHEMA_F6_FLEET) \
             .csv(f"{f6_dir}/synthetic_fleet.csv")
 
@@ -65,6 +76,8 @@ class BronzeReader:
         """Lee el catálogo de rutas programadas."""
         return self.spark.read \
             .option("header", "true") \
+            .option("enforceSchema", "false") \
+            .option("mode", "FAILFAST") \
             .schema(SCHEMA_F6_ROUTES) \
             .csv(f"{f6_dir}/synthetic_routes.csv")
 
@@ -72,19 +85,25 @@ class BronzeReader:
         """Lee los eventos operacionales OOOI depositados por Worker Lake en Bronze."""
         try:
             return self.spark.read \
+                .option("mode", "FAILFAST") \
                 .schema(SCHEMA_EVENTO_OOOI) \
                 .json(f"{events_dir}/oooi")
-        except Exception:
-            return None
+        except AnalysisException as exc:
+            if exc.getErrorClass() == "PATH_NOT_FOUND":
+                return None
+            raise
 
     def read_pago_events(self, events_dir: str) -> Optional[DataFrame]:
         """Lee los eventos de pagos asíncronos depositados en Bronze."""
         try:
             return self.spark.read \
+                .option("mode", "FAILFAST") \
                 .schema(SCHEMA_EVENTO_PAGO) \
                 .json(f"{events_dir}/pagos")
-        except Exception:
-            return None
+        except AnalysisException as exc:
+            if exc.getErrorClass() == "PATH_NOT_FOUND":
+                return None
+            raise
 
     def read_payment_events(self, events_dir: str) -> Optional[DataFrame]:
         """Alias en inglés para lectura de eventos de compensaciones y pagos."""
@@ -94,10 +113,13 @@ class BronzeReader:
         """Lee las observaciones meteorológicas de aeropuertos."""
         try:
             return self.spark.read \
+                .option("mode", "FAILFAST") \
                 .schema(SCHEMA_OBSERVACION_CLIMA) \
                 .json(f"{events_dir}/clima")
-        except Exception:
-            return None
+        except AnalysisException as exc:
+            if exc.getErrorClass() == "PATH_NOT_FOUND":
+                return None
+            raise
 
     def read_weather_observations(self, events_dir: str) -> Optional[DataFrame]:
         """Alias en inglés para observaciones meteorológicas."""
@@ -107,14 +129,23 @@ class BronzeReader:
         """Lee las trazas de radar OpenSky depositadas en Bronze."""
         try:
             return self.spark.read \
+                .option("mode", "FAILFAST") \
                 .schema(SCHEMA_POSICION_AERONAVE) \
                 .json(f"{events_dir}/opensky")
-        except Exception:
-            return None
+        except AnalysisException as exc:
+            if exc.getErrorClass() == "PATH_NOT_FOUND":
+                return None
+            raise
 
     def read_rds_flights(self, rds_bronze_dir: str) -> Optional[DataFrame]:
         """Lee los vuelos transaccionales extraídos desde PostgreSQL RDS en formato Parquet."""
         try:
             return self.spark.read.parquet(f"{rds_bronze_dir}/vuelo")
-        except Exception:
-            return None
+        except AnalysisException as exc:
+            if exc.getErrorClass() == "PATH_NOT_FOUND":
+                return None
+            raise
+
+    def read_rds_table(self, directory, table, snapshot_date):
+        # All operational inputs belong to the same snapshot, not all historical copies.
+        return self.spark.read.parquet(f"{directory}/{table}/fecha_proceso={snapshot_date}")

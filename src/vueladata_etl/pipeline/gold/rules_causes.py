@@ -35,16 +35,21 @@ class CausesRuleEngine:
             else:
                 df = df.withColumn(alias, F.lit(0.0).cast(DoubleType()))
 
+        if "causa_previa_imputable" not in df.columns:
+            df = df.withColumn("causa_previa_imputable", F.lit(None).cast("boolean"))
+        # Unknown previous cause must not be automatically charged to the airline.
+        df = df.withColumn("tipo_previo", F.when(F.col("causa_previa_imputable"), "IMPUTABLE")
+                           .when(~F.col("causa_previa_imputable"), "NO_IMPUTABLE").otherwise("DESCONOCIDA"))
         # Generar registros desglosados mediante stack
         df_unpivoted = df.select(
             "anio", "mes",
             F.expr("""
                 stack(5,
                     'AEROLINEA', 'Mantenimiento y Operaciones Aerolínea', true, 'IMPUTABLE', m_aerolinea,
-                    'AERONAVE_TARDIA', 'Llegada Tardía de Aeronave (Rotación)', true, 'IMPUTABLE', m_aeronave,
-                    'CLIMA', 'Condiciones Meteorológicas Adversas', false, 'NO IMPUTABLE', m_clima,
-                    'SISTEMA_ATC', 'Control de Tráfico Aéreo (ATC / NAS)', false, 'NO IMPUTABLE', m_sistema,
-                    'SEGURIDAD', 'Seguridad Aeroportuaria y Terminal', false, 'NO IMPUTABLE', m_seguridad
+                    'AERONAVE_TARDIA', 'Llegada Tardía de Aeronave (Rotación)', causa_previa_imputable, tipo_previo, m_aeronave,
+                    'CLIMA', 'Condiciones Meteorológicas Adversas', false, 'NO_IMPUTABLE', m_clima,
+                    'SISTEMA_ATC', 'Control de Tráfico Aéreo (ATC / NAS)', false, 'NO_IMPUTABLE', m_sistema,
+                    'SEGURIDAD', 'Seguridad Aeroportuaria y Terminal', false, 'NO_IMPUTABLE', m_seguridad
                 ) as (codigo_causa, nombre_causa, es_imputable, tipo_imputabilidad, minutos_retraso)
             """)
         ).filter(F.col("minutos_retraso") > 0)

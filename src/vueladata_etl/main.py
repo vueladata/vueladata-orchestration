@@ -41,7 +41,8 @@ def parse_args():
     )
     parser.add_argument(
         "--bucket",
-        default=os.getenv("S3_DATA_LAKE_BUCKET", "vueladata-datalake-dev-239700238526-us-east-1-an"),
+        default=os.getenv("S3_DATA_LAKE_BUCKET"),
+        required=not bool(os.getenv("S3_DATA_LAKE_BUCKET")),
         help="Bucket S3 o ruta base del Data Lake"
     )
     parser.add_argument(
@@ -59,6 +60,7 @@ def parse_args():
         default="dag_daily_batch_spark",
         help="Identificador del DAG orquestador"
     )
+    parser.add_argument("--sync-rds", action="store_true", help="Optional relational serving copy; Gold S3 is the analytical source")
     return parser.parse_args()
 
 
@@ -122,25 +124,15 @@ def main():
         # ── FASE 4: CAPA GOLD (Reglas de Negocio RN-01 y RN-08) ──────────────
         if args.layer in ["gold", "all"]:
             print("\n>>> [3/4] INICIANDO MODELADO CAPA GOLD (RN-01 y RN-08) <<<")
-            gold_aggregator.process_gold_metrics(df_silver_flights)
+            df_gold = gold_aggregator.process_gold_metrics(df_silver_flights)
 
-            # ── FASE 5: SINCRONIZACIÓN A LA BASE DE DATOS ANALÍTICA (RDS) ────
-            print("\n>>> [4/4] CARGANDO RESULTADOS A LA BASE DE DATOS ANALÍTICA RDS <<<")
-            if df_silver_flights is not None:
-                filas_escritas += gold_loader.cargar_fact_vuelos(df_silver_flights, limit=5000)
-
-            # Leer cubos agregados generados en Gold y sincronizar
-            try:
-                df_kpi_otp = spark.read.parquet(f"{path_config.gold_path}/puntualidad_aerolineas")
-                filas_escritas += gold_loader.cargar_kpi_otp(df_kpi_otp)
-            except Exception as e:
-                print(f"[!] Aviso lectura puntualidad_aerolineas: {e}")
-
-            try:
-                df_kpi_prop = spark.read.parquet(f"{path_config.gold_path}/propagacion_flota")
-                filas_escritas += gold_loader.cargar_kpi_propagacion(df_kpi_prop)
-            except Exception as e:
-                print(f"[!] Aviso lectura propagacion_flota: {e}")
+            # RDS serving is optional; never silently publish a 5,000-row sample.
+            if args.sync_rds:
+                if df_gold.count() > 10000:
+                    raise ValueError("Relational serving export exceeds 10,000 rows; use S3 Gold/Athena or a dedicated bulk loader")
+                filas_escritas += gold_loader.cargar_fact_vuelos(df_gold, limit=10000)
+                filas_escritas += gold_loader.cargar_kpi_otp(spark.read.parquet(f"{path_config.gold_path}/puntualidad_aerolineas"))
+                filas_escritas += gold_loader.cargar_kpi_propagacion(spark.read.parquet(f"{path_config.gold_path}/propagacion_flota"))
 
         # 2. Registrar finalización exitosa en la base de datos de auditoría
         audit.registrar_fin(
@@ -149,7 +141,7 @@ def main():
             filas_escritas=filas_escritas,
             filas_rechazadas=filas_rechazadas,
             estado="SUCCESS",
-            mensaje="Pipeline Medallion ejecutado y sincronizado con éxito total"
+            mensaje="Pipeline Medallion finalizado; S3 Gold publicado"
         )
 
         print("\n═════════════════════════════════════════════════════════════════")

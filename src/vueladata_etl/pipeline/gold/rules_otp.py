@@ -21,15 +21,20 @@ class OtpRuleEngine:
         """
         df = df_flights
         if "retraso_llegada_min" not in df.columns:
-            df = df.withColumn("retraso_llegada_min", F.lit(0.0).cast(DoubleType()))
+            df = df.withColumn("retraso_llegada_min", F.lit(None).cast(DoubleType()))
         if "cancelado" not in df.columns:
             df = df.withColumn("cancelado", F.lit(0))
         if "desviado" not in df.columns:
             df = df.withColumn("desviado", F.lit(0))
 
+        if {"llegada_real_ts", "llegada_programada_ts"} <= set(df.columns):
+            df = df.withColumn("retraso_llegada_min", F.when(
+                F.col("llegada_real_ts").isNotNull() & F.col("llegada_programada_ts").isNotNull(),
+                (F.col("llegada_real_ts").cast("long") - F.col("llegada_programada_ts").cast("long")) / 60.0
+            ).otherwise(F.col("retraso_llegada_min")))
         return df.withColumn(
             "retraso_llegada_val",
-            F.coalesce(F.col("retraso_llegada_min").cast(DoubleType()), F.lit(0.0))
+            F.col("retraso_llegada_min").cast(DoubleType())
         ).withColumn(
             "es_cancelado",
             F.when(F.col("cancelado") == 1, 1).otherwise(0)
@@ -38,7 +43,7 @@ class OtpRuleEngine:
             F.when(F.col("desviado") == 1, 1).otherwise(0)
         ).withColumn(
             "es_operado",
-            F.when((F.col("es_cancelado") == 0) & (F.col("es_desviado") == 0), 1).otherwise(0)
+            F.when((F.col("es_cancelado") == 0) & (F.col("es_desviado") == 0) & F.col("retraso_llegada_val").isNotNull(), 1).otherwise(0)
         ).withColumn(
             "es_puntual_otp",
             F.when(
@@ -57,8 +62,9 @@ class OtpRuleEngine:
                 F.sum("es_desviado").alias("total_vuelos_desviados"),
                 F.sum("es_operado").alias("total_vuelos_operados"),
                 F.sum("es_puntual_otp").alias("total_vuelos_puntuales"),
-                F.avg("retraso_llegada_val").alias("promedio_retraso_llegada_min"),
-                F.avg("retraso_salida_min").alias("promedio_retraso_salida_min")
+                F.sum(F.when((F.col("es_cancelado") == 0) & (F.col("es_desviado") == 0) & F.col("retraso_llegada_val").isNull(), 1).otherwise(0)).alias("total_vuelos_sin_hora_llegada"),
+                F.avg(F.when(F.col("es_operado") == 1, F.col("retraso_llegada_val"))).alias("promedio_retraso_llegada_min"),
+                F.avg(F.when(F.col("es_operado") == 1, F.col("retraso_salida_min"))).alias("promedio_retraso_salida_min")
             ) \
             .withColumn(
                 "tasa_otp_porcentaje",
@@ -88,8 +94,9 @@ class OtpRuleEngine:
                 F.sum("es_desviado").alias("total_vuelos_desviados"),
                 F.sum("es_operado").alias("total_vuelos_operados"),
                 F.sum("es_puntual_otp").alias("total_vuelos_puntuales"),
-                F.avg("retraso_llegada_val").alias("promedio_retraso_llegada_min"),
-                F.avg("retraso_salida_min").alias("promedio_retraso_salida_min")
+                F.sum(F.when((F.col("es_cancelado") == 0) & (F.col("es_desviado") == 0) & F.col("retraso_llegada_val").isNull(), 1).otherwise(0)).alias("total_vuelos_sin_hora_llegada"),
+                F.avg(F.when(F.col("es_operado") == 1, F.col("retraso_llegada_val"))).alias("promedio_retraso_llegada_min"),
+                F.avg(F.when(F.col("es_operado") == 1, F.col("retraso_salida_min"))).alias("promedio_retraso_salida_min")
             ) \
             .withColumn(
                 "tasa_otp_porcentaje",
