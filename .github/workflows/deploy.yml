@@ -32,6 +32,8 @@ jobs:
         run: docker build -t vueladata-airflow-test -f infrastructure/docker/airflow/Dockerfile .
       - name: Load DAGs and validate deployment contracts
         run: |
+          mkdir -p reports
+          chmod 777 reports
           docker run --rm --entrypoint bash -v "$PWD:/workspace" -w /workspace vueladata-airflow-test -c 'pip install pytest==8.4.2 && python -m pytest tests -v --junitxml=reports/pytest-dags.xml'
       - name: Upload report
         if: always()
