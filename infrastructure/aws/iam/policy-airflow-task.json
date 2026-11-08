@@ -11,8 +11,8 @@
         "s3:DeleteObject"
       ],
       "Resource": [
-        "arn:aws:s3:::vueladata-datalake-dev-239700238526-us-east-1-an",
-        "arn:aws:s3:::vueladata-datalake-dev-239700238526-us-east-1-an/*"
+        "arn:aws:s3:::${S3_DATA_LAKE_BUCKET}",
+        "arn:aws:s3:::${S3_DATA_LAKE_BUCKET}/*"
       ]
     },
     {
@@ -32,8 +32,8 @@
         "iam:PassRole"
       ],
       "Resource": [
-        "arn:aws:iam::239700238526:role/ecsTaskExecutionRole",
-        "arn:aws:iam::239700238526:role/vueladata-spark-task-role"
+        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
+        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/vueladata-spark-task-role"
       ]
     },
     {
@@ -43,8 +43,8 @@
         "lambda:InvokeFunction"
       ],
       "Resource": [
-        "arn:aws:lambda:us-east-1:239700238526:function:opensky-ingestor",
-        "arn:aws:lambda:us-east-1:239700238526:function:openmeteo-ingestor"
+        "arn:aws:lambda:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:function:opensky-ingestor",
+        "arn:aws:lambda:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:function:openmeteo-ingestor"
       ]
     },
     {
@@ -55,6 +55,13 @@
         "logs:PutLogEvents"
       ],
       "Resource": "arn:aws:logs:*:*:*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:GetLogEvents"
+      ],
+      "Resource": "arn:aws:logs:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:log-group:/ecs/vueladata-spark-etl:*"
     }
   ]
 }

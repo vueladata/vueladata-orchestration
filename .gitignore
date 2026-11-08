@@ -105,3 +105,6 @@ desktop.ini
 *.parquet
 data/
 downloads/
+
+# Generated local/CI audit and test reports
+reports/

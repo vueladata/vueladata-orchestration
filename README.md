@@ -85,3 +85,10 @@ vueladata-airflow/
    - **Regla RN-01**: Cálculo de puntualidad OTP (retraso llegada $\le 15$ min en vuelos operados).
    - **Regla RN-08**: Cálculo de propagación y efecto dominó en rotación de flota restando tiempo mínimo de escala (45 min nacional / 60 min internacional).
    - Persistencia en `s3a://.../gold/` en formato Parquet particionado.
+
+
+## Configuración y validación
+
+Completar los secretos de `.env.example` para ejecución local. En AWS, aprovisionar los parámetros `/vueladata/dev/` referenciados en `secrets` de las Task Definitions antes del despliegue; las conexiones de metadatos de Airflow deben apuntar a la base `airflow_db`.
+
+El CI ejecuta pytest con Airflow 3.1.5. Los resultados en `reports/` son temporales y están excluidos de Git y del contexto Docker.

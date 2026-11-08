@@ -1,7 +1,9 @@
 param (
-    [string]$AwsAccountId = "239700238526",
+    [string]$AwsAccountId = $env:AWS_ACCOUNT_ID,
     [string]$AwsRegion = "us-east-1"
 )
+
+if (-not $AwsAccountId) { throw "Set AWS_ACCOUNT_ID" }
 
 $EcrRegistry = "$AwsAccountId.dkr.ecr.$AwsRegion.amazonaws.com"
 $AirflowRepo = "$EcrRegistry/vueladata/airflow"

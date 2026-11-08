@@ -7,3 +7,6 @@ __pycache__
 .env
 logs/
 .pytest_cache/
+
+# Generated local/CI audit and test reports
+reports/

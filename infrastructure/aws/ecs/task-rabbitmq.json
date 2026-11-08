@@ -24,16 +24,7 @@
           "protocol": "tcp"
         }
       ],
-      "environment": [
-        {
-          "name": "RABBITMQ_DEFAULT_USER",
-          "value": "${RABBITMQ_USER}"
-        },
-        {
-          "name": "RABBITMQ_DEFAULT_PASS",
-          "value": "${RABBITMQ_PASSWORD}"
-        }
-      ],
+      "environment": [],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
@@ -42,7 +33,17 @@
           "awslogs-stream-prefix": "broker",
           "awslogs-create-group": "true"
         }
-      }
+      },
+      "secrets": [
+        {
+          "name": "RABBITMQ_DEFAULT_PASS",
+          "valueFrom": "/vueladata/dev/rabbitmq/password"
+        },
+        {
+          "name": "RABBITMQ_DEFAULT_USER",
+          "valueFrom": "/vueladata/dev/rabbitmq/user"
+        }
+      ]
     }
   ]
 }

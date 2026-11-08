@@ -1,0 +1,111 @@
+{
+  "family": "vueladata-airflow-init",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/vueladata-airflow-task-role",
+  "containerDefinitions": [
+    {
+      "name": "airflow-init",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/vueladata/airflow:latest",
+      "essential": true,
+      "command": [
+        "db",
+        "migrate"
+      ],
+      "environment": [
+        {
+          "name": "AIRFLOW__CORE__EXECUTOR",
+          "value": "CeleryExecutor"
+        },
+        {
+          "name": "AIRFLOW__CORE__AUTH_MANAGER",
+          "value": "airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager"
+        },
+        {
+          "name": "AIRFLOW__CORE__LOAD_EXAMPLES",
+          "value": "false"
+        },
+        {
+          "name": "AWS_DEFAULT_REGION",
+          "value": "${AWS_DEFAULT_REGION}"
+        },
+        {
+          "name": "AIRFLOW__CORE__EXECUTION_API_SERVER_URL",
+          "value": "http://vueladata-airflow-webserver.vueladata.local:8080/execution/"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/vueladata-airflow",
+          "awslogs-region": "${AWS_DEFAULT_REGION}",
+          "awslogs-stream-prefix": "webserver",
+          "awslogs-create-group": "true"
+        }
+      },
+      "secrets": [
+        {
+          "name": "AIRFLOW__API_AUTH__JWT_SECRET",
+          "valueFrom": "/vueladata/dev/airflow/jwt_secret"
+        },
+        {
+          "name": "AIRFLOW__API__SECRET_KEY",
+          "valueFrom": "/vueladata/dev/airflow/api_secret_key"
+        },
+        {
+          "name": "AIRFLOW__CELERY__BROKER_URL",
+          "valueFrom": "/vueladata/dev/celery/broker_url"
+        },
+        {
+          "name": "AIRFLOW__CELERY__RESULT_BACKEND",
+          "valueFrom": "/vueladata/dev/celery/result_backend"
+        },
+        {
+          "name": "AIRFLOW__CORE__FERNET_KEY",
+          "valueFrom": "/vueladata/dev/airflow/fernet_key"
+        },
+        {
+          "name": "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN",
+          "valueFrom": "/vueladata/dev/airflow/database_url"
+        },
+        {
+          "name": "ECS_CLUSTER_NAME",
+          "valueFrom": "/vueladata/dev/ecs/cluster_name"
+        },
+        {
+          "name": "ECS_SECURITY_GROUP_IDS",
+          "valueFrom": "/vueladata/dev/ecs/security_group_ids"
+        },
+        {
+          "name": "ECS_SPARK_CONTAINER_NAME",
+          "valueFrom": "/vueladata/dev/ecs/spark_container_name"
+        },
+        {
+          "name": "ECS_SPARK_TASK_DEFINITION",
+          "valueFrom": "/vueladata/dev/ecs/spark_task_definition"
+        },
+        {
+          "name": "ECS_SUBNET_IDS",
+          "valueFrom": "/vueladata/dev/ecs/subnet_ids"
+        },
+        {
+          "name": "LAMBDA_OPENMETEO_NAME",
+          "valueFrom": "/vueladata/dev/lambda/openmeteo_name"
+        },
+        {
+          "name": "LAMBDA_OPENSKY_NAME",
+          "valueFrom": "/vueladata/dev/lambda/opensky_name"
+        },
+        {
+          "name": "S3_DATA_LAKE_BUCKET",
+          "valueFrom": "/vueladata/dev/s3/bucket_name"
+        }
+      ]
+    }
+  ]
+}

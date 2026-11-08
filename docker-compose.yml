@@ -14,8 +14,8 @@ x-airflow-common: &airflow-common
     AIRFLOW__CELERY__BROKER_URL: ${AIRFLOW__CELERY__BROKER_URL:-amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672//}
 
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
-    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-local_dev_jwt_secret_change_me}
-    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:-local_dev_api_secret_change_me}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?Set AIRFLOW_JWT_SECRET}
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:?Set AIRFLOW_API_SECRET_KEY}
 
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
@@ -23,7 +23,14 @@ x-airflow-common: &airflow-common
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
 
     AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
-    S3_DATA_LAKE_BUCKET: ${S3_DATA_LAKE_BUCKET:-vueladata-datalake-bronze}
+    S3_DATA_LAKE_BUCKET: ${S3_DATA_LAKE_BUCKET:-}
+    ECS_CLUSTER_NAME: ${ECS_CLUSTER_NAME:-vueladata-cluster}
+    ECS_SUBNET_IDS: ${ECS_SUBNET_IDS:-[]}
+    ECS_SECURITY_GROUP_IDS: ${ECS_SECURITY_GROUP_IDS:-[]}
+    ECS_SPARK_TASK_DEFINITION: ${ECS_SPARK_TASK_DEFINITION:-vueladata-spark-etl}
+    ECS_SPARK_CONTAINER_NAME: ${ECS_SPARK_CONTAINER_NAME:-spark-etl}
+    LAMBDA_OPENSKY_NAME: ${LAMBDA_OPENSKY_NAME:-opensky-ingestor}
+    LAMBDA_OPENMETEO_NAME: ${LAMBDA_OPENMETEO_NAME:-openmeteo-ingestor}
 
   volumes:
     - ./dags:/opt/airflow/dags
@@ -49,7 +56,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-vueladata}
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -71,7 +78,7 @@ services:
       - "15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-rabbit_admin}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-VuelaData_Rabbit2026!}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -106,6 +113,10 @@ services:
     ports:
       - "8080:8080"
     depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
     healthcheck:
@@ -120,16 +131,36 @@ services:
     <<: *airflow-common
     command: scheduler
     depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   airflow-dag-processor:
     <<: *airflow-common
     command: dag-processor
     depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   airflow-worker:
@@ -139,18 +170,38 @@ services:
       <<: *airflow-environment
       DUMB_INIT_SETSID: "0"
     depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
       airflow-apiserver:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d \"celery@$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   airflow-triggerer:
     <<: *airflow-common
     command: triggerer
     depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type TriggererJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   # ============================================================================
@@ -164,11 +215,17 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-vueladata}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vueladata}
       PORT: 8000
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/db', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   worker-rds:
@@ -178,17 +235,25 @@ services:
     container_name: vueladata-worker-rds
     command: ["python", "-m", "worker_rds.main"]
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-vueladata}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vueladata}
       RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-rabbit_admin}
-      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-VuelaData_Rabbit2026!}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
       QUEUE_RDS: ${QUEUE_RDS:-q.rds_writer}
+    volumes:
+      - ./infrastructure/docker/health/worker_health.py:/opt/health/worker_health.py:ro
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "/opt/health/worker_health.py", "worker_rds.main"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   worker-lake:
@@ -199,9 +264,9 @@ services:
     command: ["python", "-m", "worker_lake.main"]
     environment:
       RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-rabbit_admin}
-      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-VuelaData_Rabbit2026!}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
       QUEUE_LAKE: ${QUEUE_LAKE:-q.lake_writer}
       AWS_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
       S3_BUCKET_BRONZE: ${S3_DATA_LAKE_BUCKET:-vueladata-datalake-bronze}
@@ -209,10 +274,17 @@ services:
       LAKE_FLUSH_EVERY_N: 50
       LAKE_FLUSH_EVERY_SECONDS: 60
     volumes:
+      - ./infrastructure/docker/health/worker_health.py:/opt/health/worker_health.py:ro
       - datalake-bronze:/app/data/lake_bronze
     depends_on:
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "/opt/health/worker_health.py", "worker_lake.main"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   worker-notificaciones:
@@ -222,22 +294,30 @@ services:
     container_name: vueladata-worker-notificaciones
     command: ["python", "-m", "worker_notificaciones.main"]
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-vueladata}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vueladata}
       RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-rabbit_admin}
-      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-VuelaData_Rabbit2026!}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
       SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USUARIO: ${SMTP_USUARIO:-}
       SMTP_CLAVE: ${SMTP_CLAVE:-}
       SMTP_REMITENTE: ${SMTP_REMITENTE:-}
       EMAIL_DESTINO_PRUEBAS: ${EMAIL_DESTINO_PRUEBAS:-}
+    volumes:
+      - ./infrastructure/docker/health/worker_health.py:/opt/health/worker_health.py:ro
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "/opt/health/worker_health.py", "worker_notificaciones.main"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   # ============================================================================
@@ -250,15 +330,23 @@ services:
     container_name: vueladata-stream-f4
     environment:
       RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-rabbit_admin}
-      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-VuelaData_Rabbit2026!}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
       QUEUE_NAME: ${QUEUE_NAME:-eventos_oooi_queue}
       STREAM_DELAY_SECONDS: 1
       TOTAL_VUELOS: 100
+    volumes:
+      - ./infrastructure/docker/health/worker_health.py:/opt/health/worker_health.py:ro
     depends_on:
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "/opt/health/worker_health.py", "src/producer.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: on-failure
 
 volumes:
