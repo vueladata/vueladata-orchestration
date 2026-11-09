@@ -70,6 +70,9 @@ def obtener_url_postgres() -> str:
     host = os.environ.get("RDS_HOST", "vueladata-postgres-dev.ci9mcasuas3l.us-east-1.rds.amazonaws.com")
     port = os.environ.get("RDS_PORT", "5432")
     user = os.environ.get("RDS_USER", "postgres")
-    password = os.environ.get("RDS_PASSWORD", "postgres")
+    password = os.environ.get("RDS_PASSWORD")
+    if not password:
+        raise RuntimeError("RDS_PASSWORD is required; inject it from SSM or the local environment")
     dbname = os.environ.get("RDS_DB", "vueladata")
-    return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
+    from urllib.parse import quote
+    return f"postgresql+psycopg2://{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}/{dbname}"

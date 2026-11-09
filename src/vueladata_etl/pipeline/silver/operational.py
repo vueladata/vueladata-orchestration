@@ -52,7 +52,7 @@ def connection_rows(read):
         selected = flights.select(F.col('id_vuelo').alias('_vuelo_' + side), projected.alias(side + '_conexion_utc'), F.col(actual).alias('_real_' + side), F.col('_estado').isin('CANCELADO', 'CANCELLED', 'CANCEL').alias('_cancel_' + side))
         links = links.join(selected, '_vuelo_' + side)
     minimum = read('tiempo_minimo_conexion').select('id_regla_conexion', 'id_aeropuerto', F.col('minutos_minimos').alias('tiempo_min_conexion_min'))
-    airports = read('aeropuerto').select('id_aeropuerto', F.col('codigo_iata').alias('aeropuerto_hub'), F.col('zona_horaria').alias('zona_hub'))
+    airports = read('aeropuerto').select('id_aeropuerto', F.col('codigo_iata').alias('aeropuerto_hub'), F.col('zona_horaria').alias('zona_hub'), F.col('nombre').cast('string').alias('nombre_hub'))
     links = links.join(F.broadcast(minimum), 'id_regla_conexion').join(F.broadcast(airports), 'id_aeropuerto')
     latest = (read('evaluacion_conexion').withColumn('_rn', F.row_number().over(Window.partitionBy('id_conexion').orderBy(F.col('fecha_evaluacion_utc').desc(), F.col('id_evaluacion').desc())))
               .filter('_rn = 1').select('id_conexion', F.col('estado').alias('estado_conexion'), 'llegada_estimada_utc', 'salida_estimada_utc'))

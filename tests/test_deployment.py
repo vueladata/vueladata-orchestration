@@ -18,7 +18,9 @@ def test_task_definitions_use_ssm():
         for container in definition['containerDefinitions']:
             assert container['secrets']
             for secret in container['secrets']:
-                assert secret['valueFrom'].startswith('/vueladata/dev/')
+                assert secret['valueFrom'].startswith('/vueladata/dev/') or secret['valueFrom'] in {
+                    '/vueladata/airflow/api_secret_key', '/vueladata/airflow/fernet_key',
+                    '/vueladata/airflow/jwt_secret'}
             for entry in container.get('environment', []):
                 assert not re.search(r'PASSWORD|SECRET|FERNET|BROKER_URL|RESULT_BACKEND|SQL_ALCHEMY_CONN|DATABASE_URL|_PASS$', entry['name'])
 
@@ -46,3 +48,8 @@ def test_shared_airflow_auth_secrets():
             names = {entry['name'] for entry in container['secrets']}
             assert {'AIRFLOW__API_AUTH__JWT_SECRET', 'AIRFLOW__API__SECRET_KEY',
                     'AIRFLOW__CORE__FERNET_KEY'} <= names
+
+            refs = {entry['name']: entry['valueFrom'] for entry in container['secrets']}
+            assert refs['AIRFLOW__API_AUTH__JWT_SECRET'] == '/vueladata/airflow/jwt_secret'
+            assert refs['AIRFLOW__API__SECRET_KEY'] == '/vueladata/airflow/api_secret_key'
+            assert refs['AIRFLOW__CORE__FERNET_KEY'] == '/vueladata/airflow/fernet_key'
