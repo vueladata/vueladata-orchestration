@@ -15,7 +15,7 @@ class GoldAggregator:
     def __init__(self, spark, path_config):
         self.spark, self.paths = spark, path_config
 
-    def process_gold_metrics(self, df_flights=None):
+    def process_gold_metrics(self, df_flights=None, *, only_star_model=False):
         if df_flights is None:
             df_flights = self.spark.read.parquet(f"{self.paths.silver_path}/vuelos_silver")
         df = previous_cause(df_flights)
@@ -28,15 +28,19 @@ class GoldAggregator:
                 if exc.getErrorClass() != "PATH_NOT_FOUND":
                     raise
                 connections = df.limit(0)
-            tables = {
-                "puntualidad_aerolineas": OtpRuleEngine.aggregate_kpi_otp(df),
-                "puntualidad_rutas": OtpRuleEngine.aggregate_kpi_otp_rutas_franjas(df),
-                "causas_retraso": CausesRuleEngine.aggregate_kpi_causas(df),
-                "costos_compensacion": CompensationRuleEngine.aggregate_kpi_compensaciones(df),
-                "conexiones_hubs": ConnectionsRuleEngine.aggregate_kpi_conexiones(connections),
-                "propagacion_flota": DelayPropagationEngine.aggregate_propagation_kpi(df),
-                "impacto_clima": WeatherRuleEngine.aggregate_kpi_clima(df),
-            }
+            tables = {}
+            if not only_star_model:
+                if "nombre_hub" not in connections.columns and not connections.isEmpty():
+                    raise ValueError("Silver conexiones lacks nombre_hub: rebuild Silver with the airport catalog before publishing BI cubes")
+                tables = {
+                    "puntualidad_aerolineas": OtpRuleEngine.aggregate_kpi_otp(df),
+                    "puntualidad_rutas": OtpRuleEngine.aggregate_kpi_otp_rutas_franjas(df),
+                    "causas_retraso": CausesRuleEngine.aggregate_kpi_causas(df),
+                    "costos_compensacion": CompensationRuleEngine.aggregate_kpi_compensaciones(df),
+                    "conexiones_hubs": ConnectionsRuleEngine.aggregate_kpi_conexiones(connections),
+                    "propagacion_flota": DelayPropagationEngine.aggregate_propagation_kpi(df),
+                    "impacto_clima": WeatherRuleEngine.aggregate_kpi_clima(df),
+                }
             tables.update(build_star(df, connections))
             for name, table in tables.items():
                 writer = (table.write.mode("overwrite").option("partitionOverwriteMode", "static")

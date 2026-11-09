@@ -68,7 +68,8 @@
     "total_conexiones_perdidas": "bigint",
     "promedio_minutos_escala_disponible": "double",
     "tasa_perdida_conexiones_pct": "double",
-    "fecha_actualizacion_utc": "timestamp"
+    "fecha_actualizacion_utc": "timestamp",
+    "nombre_hub": "string"
   },
   "propagacion_flota": {
     "anio": "int",

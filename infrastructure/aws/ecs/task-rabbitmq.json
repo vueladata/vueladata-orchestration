@@ -16,7 +16,8 @@
         {
           "containerPort": 5672,
           "hostPort": 5672,
-          "protocol": "tcp"
+          "protocol": "tcp",
+          "name": "rabbitmq-5672"
         },
         {
           "containerPort": 15672,

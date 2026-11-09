@@ -11,8 +11,8 @@ def test_real_catalogs_fares_and_connection(spark):
         return spark.createDataFrame(rows, schema)
     tables = {
         'ciudad':frame([(1,1),(2,2)],'id_ciudad long, id_pais long'),
-        'aeropuerto':frame([(1,1,'LAX','America/Los_Angeles'),(2,2,'MEX','America/Mexico_City')],
-            'id_aeropuerto long, id_ciudad long, codigo_iata string, zona_horaria string'),
+        'aeropuerto':frame([(1,1,'LAX','America/Los_Angeles','Los Angeles International'),(2,2,'MEX','America/Mexico_City','Benito Juarez')],
+            'id_aeropuerto long, id_ciudad long, codigo_iata string, zona_horaria string, nombre string'),
         'aerolinea':frame([(1,'VD')],'id_aerolinea long, codigo_iata string'),
         'aeronave':frame([(1,1,'REAL-TAIL')],'id_aeronave long, id_aerolinea long, matricula string'),
         'ruta':frame([(1,1,2)],'id_ruta long, id_aeropuerto_origen long, id_aeropuerto_destino long'),
@@ -43,3 +43,7 @@ def test_real_catalogs_fares_and_connection(spark):
     assert con.es_conexion_en_riesgo
 
     assert con.es_conexion_perdida == 1  # The outgoing segment was cancelled.
+
+    hub = ConnectionsRuleEngine.aggregate_kpi_conexiones(connection_rows(read)).first()
+    assert hub.nombre_hub == "Benito Juarez"
+    assert hub.total_conexiones_programadas == 1

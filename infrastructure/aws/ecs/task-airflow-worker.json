@@ -51,11 +51,11 @@
       "secrets": [
         {
           "name": "AIRFLOW__API_AUTH__JWT_SECRET",
-          "valueFrom": "/vueladata/dev/airflow/jwt_secret"
+          "valueFrom": "/vueladata/airflow/jwt_secret"
         },
         {
           "name": "AIRFLOW__API__SECRET_KEY",
-          "valueFrom": "/vueladata/dev/airflow/api_secret_key"
+          "valueFrom": "/vueladata/airflow/api_secret_key"
         },
         {
           "name": "AIRFLOW__CELERY__BROKER_URL",
@@ -67,7 +67,7 @@
         },
         {
           "name": "AIRFLOW__CORE__FERNET_KEY",
-          "valueFrom": "/vueladata/dev/airflow/fernet_key"
+          "valueFrom": "/vueladata/airflow/fernet_key"
         },
         {
           "name": "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN",

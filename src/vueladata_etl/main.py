@@ -61,12 +61,26 @@ def parse_args():
         help="Identificador del DAG orquestador"
     )
     parser.add_argument("--sync-rds", action="store_true", help="Optional relational serving copy; Gold S3 is the analytical source")
-    return parser.parse_args()
+    parser.add_argument("--only-star-model", action="store_true",
+                        help="Read existing Silver and publish only the nine star tables; skip RDS and all other layers")
+    args = parser.parse_args()
+    if args.only_star_model:
+        if args.layer not in ("all", "gold") or args.sync_rds:
+            parser.error("--only-star-model requires --layer gold (or default) and forbids --sync-rds")
+        args.layer = "gold"
+    return args
 
 
 def main():
     args = parse_args()
     path_config = PathConfig.from_bucket(args.bucket)
+    if args.only_star_model:
+        spark = SparkSessionFactory.create(app_name="VuelaData-Gold-StarOnly")
+        try:
+            GoldAggregator(spark, path_config).process_gold_metrics(only_star_model=True)
+        finally:
+            spark.stop()
+        return
     audit = AuditManager()
 
     fecha_proceso = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
