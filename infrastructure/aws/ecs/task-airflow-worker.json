@@ -37,6 +37,14 @@
         {
           "name": "AWS_DEFAULT_REGION",
           "value": "${AWS_DEFAULT_REGION}"
+        },
+        {
+          "name": "AIRFLOW__CELERY__WORKER_CONCURRENCY",
+          "value": "1"
+        },
+        {
+          "name": "AIRFLOW__CELERY__WORKER_PREFETCH_MULTIPLIER",
+          "value": "1"
         }
       ],
       "logConfiguration": {

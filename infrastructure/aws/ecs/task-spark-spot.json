@@ -20,7 +20,7 @@
         },
         {
           "name": "SPARK_SHUFFLE_PARTITIONS",
-          "value": "8"
+          "value": "64"
         },
         {
           "name": "AWS_DEFAULT_REGION",

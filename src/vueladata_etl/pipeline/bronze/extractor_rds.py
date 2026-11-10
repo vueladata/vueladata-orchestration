@@ -103,7 +103,12 @@ class RdsBronzeExtractor:
                             row.append(value)
                         records.append(tuple(row))
                     spark_df = self.spark.createDataFrame(records, schema=schema)
-                    spark_df.write.mode("overwrite").partitionBy("fecha_proceso").parquet(output_dir)
+                    # Write the exact snapshot path even when it contains no rows.
+                    # partitionBy omits empty partitions (or leaves stale rows with
+                    # dynamic overwrite), so the following Silver task cannot read it.
+                    snapshot_dir = f"{output_dir}/fecha_proceso={fecha_str}"
+                    (spark_df.drop("fecha_proceso").write.mode("overwrite")
+                     .option("partitionOverwriteMode", "static").parquet(snapshot_dir))
                 else:
                     df.to_parquet(
                         output_dir,
