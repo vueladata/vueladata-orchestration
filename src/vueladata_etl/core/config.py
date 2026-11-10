@@ -45,7 +45,8 @@ class SparkSessionFactory:
             .config("spark.sql.legacy.timeParserPolicy", "CORRECTED") \
             .config("spark.sql.session.timeZone", "UTC") \
             .config("spark.sql.adaptive.enabled", "true") \
-            .config("spark.sql.shuffle.partitions", os.getenv("SPARK_SHUFFLE_PARTITIONS", "8")) \
+            .config("spark.sql.shuffle.partitions", os.getenv("SPARK_SHUFFLE_PARTITIONS", "64")) \
+            .config("spark.sql.adaptive.coalescePartitions.enabled", "false") \
             .config("spark.sql.parquet.compression.codec", "snappy") \
             .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
             .config("spark.hadoop.fs.s3a.fast.upload", "true") \

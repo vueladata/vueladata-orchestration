@@ -130,3 +130,24 @@ ya no carga silenciosamente una muestra de 5.000 registros. El SLA de menos de
 
 El CI ejecuta `tests/spark/` en Spark 3.5.1 y las pruebas Airflow por separado.
 Los reportes temporales permanecen excluidos de Git y Docker.
+# Separación de etapas y recursos (noviembre 2026)
+
+El batch diario ejecuta `validar_entorno → procesar_bronze → procesar_silver → procesar_gold`.
+Cada etapa Spark es una tarea ECS independiente y consume la salida persistida de la anterior.
+El histórico valida sus CSV Bronze existentes y ejecuta `procesar_silver → procesar_gold`.
+Reintentar Gold no vuelve a extraer RDS ni a transformar Silver. Todas las tareas usan
+la misma fecha de proceso y el mismo run_id de Airflow.
+
+El pool `gold_writer` debe tener **un slot**: protege las escrituras Silver/Gold
+compartidas entre el batch diario y el histórico. Se mantiene `deferrable=False`
+para conservar ese slot durante toda la tarea ECS; no activar deferral sin incluir
+las tareas diferidas en el pool. El worker de 1 vCPU/2 GB usa concurrencia **1** y
+prefetch **1**, evitando el valor predeterminado de 16 procesos que produjo OOM.
+
+Spark mantiene 2 vCPU/4 GiB: `local[2]`, 64 particiones de shuffle y coalescencia
+adaptativa desactivada para no reagrupar el histórico en particiones grandes.
+Gold conserva su caché reutilizable en disco (`DISK_ONLY`); el snapshot completo
+con ocho particiones y caché en memoria agotaba el heap durante las ventanas.
+
+El DAG de Lambdas se conserva sin cambios. EventBridge sigue siendo el programador
+de ingesta continua; su pausa en Airflow es una decisión operativa separada.

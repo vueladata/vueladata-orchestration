@@ -155,7 +155,7 @@ def main():
             filas_escritas=filas_escritas,
             filas_rechazadas=filas_rechazadas,
             estado="SUCCESS",
-            mensaje="Pipeline Medallion finalizado; S3 Gold publicado"
+            mensaje=f"Etapa {args.layer.upper()} finalizada correctamente"
         )
 
         print("\n═════════════════════════════════════════════════════════════════")

@@ -7,6 +7,8 @@ x-airflow-common: &airflow-common
     - .env
   environment: &airflow-environment
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CELERY__WORKER_CONCURRENCY: "1"
+    AIRFLOW__CELERY__WORKER_PREFETCH_MULTIPLIER: "1"
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
 
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN:-postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow_db}

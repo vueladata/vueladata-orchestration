@@ -7,11 +7,11 @@ echo "Fecha y hora: $(date -u)"
 echo "Argumentos: $@"
 echo "================================================================="
 
-# Ejecutar spark-submit en modo local[*] hacia el punto de entrada de arquitectura limpia
+# Limitar concurrencia a las dos vCPU provisionadas en Fargate.
 /opt/spark/bin/spark-submit \
-    --master "local[*]" \
+    --master "${SPARK_MASTER:-local[2]}" \
     --conf "spark.driver.memory=${SPARK_DRIVER_MEMORY:-3g}" \
-    --conf "spark.sql.shuffle.partitions=${SPARK_SHUFFLE_PARTITIONS:-8}" \
+    --conf "spark.sql.shuffle.partitions=${SPARK_SHUFFLE_PARTITIONS:-64}" \
     --conf "spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem" \
     --conf "spark.hadoop.fs.s3a.aws.credentials.provider=com.amazonaws.auth.DefaultAWSCredentialsProviderChain" \
     --conf "spark.hadoop.fs.s3a.path.style.access=${S3A_PATH_STYLE_ACCESS:-false}" \

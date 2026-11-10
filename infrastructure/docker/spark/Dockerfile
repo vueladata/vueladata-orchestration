@@ -34,7 +34,8 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip==25.0.1 && \
 COPY src/ /opt/spark/work-dir/src/
 COPY infrastructure/docker/spark/entrypoint.sh /opt/spark/work-dir/entrypoint.sh
 
-RUN chmod +x /opt/spark/work-dir/entrypoint.sh
+RUN sed -i 's/\r$//' /opt/spark/work-dir/entrypoint.sh && \
+    chmod +x /opt/spark/work-dir/entrypoint.sh
 
 ENV PYTHONPATH="/opt/spark/work-dir/src:/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.7-src.zip"
 ENV PYSPARK_PYTHON=python3
