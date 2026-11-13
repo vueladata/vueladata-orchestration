@@ -77,7 +77,7 @@ def main():
     if args.only_star_model:
         spark = SparkSessionFactory.create(app_name="VuelaData-Gold-StarOnly")
         try:
-            GoldAggregator(spark, path_config).process_gold_metrics(only_star_model=True)
+            GoldAggregator(spark, path_config, mode=args.mode).process_gold_metrics(only_star_model=True)
         finally:
             spark.stop()
         return
@@ -111,7 +111,7 @@ def main():
         spark = SparkSessionFactory.create(app_name=f"VuelaData-{args.layer.capitalize()}-{args.mode.capitalize()}")
         reader = BronzeReader(spark)
         silver_transformer = SilverTransformer(reader, path_config, audit_manager=audit)
-        gold_aggregator = GoldAggregator(spark, path_config)
+        gold_aggregator = GoldAggregator(spark, path_config, mode=args.mode)
         gold_loader = GoldRdsLoader()
 
         # ── FASE 2: INGESTA OPERACIONAL (RDS -> S3 Bronze) ───────────────────

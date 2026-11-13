@@ -1,5 +1,6 @@
 """Publish the seven immutable BI datasets plus additive star-schema tables."""
 from pyspark import StorageLevel
+from pyspark.sql import functions as F
 from vueladata_etl.pipeline.gold.business_rules import previous_cause
 from pyspark.errors import AnalysisException
 from vueladata_etl.pipeline.gold.rules_otp import OtpRuleEngine
@@ -12,12 +13,16 @@ from vueladata_etl.pipeline.gold.star import build_star
 
 
 class GoldAggregator:
-    def __init__(self, spark, path_config):
-        self.spark, self.paths = spark, path_config
+    def __init__(self, spark, path_config, mode: str = "all"):
+        self.spark, self.paths, self.mode = spark, path_config, mode
 
     def process_gold_metrics(self, df_flights=None, *, only_star_model=False):
         if df_flights is None:
             df_flights = self.spark.read.parquet(f"{self.paths.silver_path}/vuelos_silver")
+        if self.mode == "daily":
+            df_flights = df_flights.filter(F.col("fuente") != "F1_KAGGLE")
+        elif self.mode == "historical":
+            df_flights = df_flights.filter(F.col("fuente") == "F1_KAGGLE")
         df = previous_cause(df_flights)
         df = DelayPropagationEngine.calculate_propagation(OtpRuleEngine.apply_otp_rule(df))
         # The full historical snapshot exceeds the 4 GiB Fargate container.
@@ -44,14 +49,20 @@ class GoldAggregator:
                     "impacto_clima": WeatherRuleEngine.aggregate_kpi_clima(df),
                 }
             tables.update(build_star(df, connections))
+            overwrite_mode = "dynamic" if self.mode == "daily" else "static"
             for name, table in tables.items():
-                writer = (table.write.mode("overwrite").option("partitionOverwriteMode", "static")
-                          .option("compression", "snappy"))
                 if {"anio", "mes"} <= set(table.columns) and not table.isEmpty():
-                    writer = writer.partitionBy("anio", "mes")
-                # Input is the COMPLETE Silver snapshot, so empty/new months clear
-                # stale metrics without losing other days or historical sources.
-                writer.parquet(f"{self.paths.gold_path}/{name}")
+                    writer = (table.write.mode("overwrite").option("partitionOverwriteMode", overwrite_mode)
+                              .option("compression", "snappy").partitionBy("anio", "mes"))
+                    writer.parquet(f"{self.paths.gold_path}/{name}")
+                else:
+                    if self.mode == "daily":
+                        try:
+                            existing = self.spark.read.parquet(f"{self.paths.gold_path}/{name}")
+                            table = existing.unionByName(table).distinct()
+                        except (AnalysisException, Exception):
+                            pass
+                    table.write.mode("overwrite").option("compression", "snappy").parquet(f"{self.paths.gold_path}/{name}")
             return df
         finally:
             df.unpersist()

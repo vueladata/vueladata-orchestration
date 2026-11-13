@@ -18,7 +18,6 @@ def spark_stage(layer, mode, dag_id):
                         "{{ ti.xcom_pull(task_ids='validar_entorno')['bucket'] }}",
                         "--date", "{{ dag_run.conf.get('date') or (dag_run.logical_date or dag_run.start_date).strftime('%Y-%m-%d') }}",
                         "--run-id", "{{ run_id }}", "--dag-id", dag_id],
-            "environment": [{"name": "SPARK_SHUFFLE_PARTITIONS", "value": "16"}],
         }]},
         awslogs_group="/ecs/vueladata-spark-etl",
         awslogs_stream_prefix="spark-spot/spark-etl",
