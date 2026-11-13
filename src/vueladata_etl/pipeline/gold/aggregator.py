@@ -25,9 +25,9 @@ class GoldAggregator:
             df_flights = df_flights.filter(F.col("fuente") == "F1_KAGGLE")
         df = previous_cause(df_flights)
         df = DelayPropagationEngine.calculate_propagation(OtpRuleEngine.apply_otp_rule(df))
-        # The full historical snapshot exceeds the 4 GiB Fargate container.
-        # Keep reusable rows on local disk so window sorts retain their heap.
-        df = df.persist(StorageLevel.DISK_ONLY)
+        # Keep reusable rows in memory with serialized RAM storage (backed by disk if needed)
+        # to maximize throughput across all 16 analytical and dimensional tables.
+        df = df.persist(StorageLevel.MEMORY_AND_DISK_SER)
         try:
             try:
                 connections = self.spark.read.parquet(f"{self.paths.silver_path}/conexiones")
