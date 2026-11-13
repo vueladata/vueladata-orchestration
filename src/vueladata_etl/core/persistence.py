@@ -18,10 +18,23 @@ def replace_sources(incoming, output, sources, base):
         previous = None
 
     if previous is None or previous.isEmpty():
-        combined = incoming
-        write_mode = "static"
-    elif "F1_KAGGLE" in sources:
-        # Full historical reload: combine and overwrite static
+        writer = incoming.write.mode('overwrite').option('compression', 'snappy')
+        if not incoming.isEmpty():
+            writer = writer.partitionBy('anio', 'mes')
+        writer.parquet(output)
+        return spark.read.parquet(output)
+
+    # Historical load: F1 Kaggle is strictly anio=2015.
+    # Write directly with dynamic partition overwrite without reading/staging 5.8M rows.
+    if sources == ["F1_KAGGLE"]:
+        writer = incoming.write.mode('overwrite').option('partitionOverwriteMode', 'dynamic').option('compression', 'snappy')
+        if not incoming.isEmpty():
+            writer = writer.partitionBy('anio', 'mes')
+        writer.parquet(output)
+        return spark.read.parquet(output)
+
+    if "F1_KAGGLE" in sources:
+        # Full reload of all sources
         combined = previous.filter(~F.col('fuente').isin(sources)).unionByName(incoming, allowMissingColumns=True)
         write_mode = "static"
     else:
