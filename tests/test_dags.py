@@ -56,7 +56,7 @@ def test_spark_templates(bag, name):
         task = dag.get_task(f'procesar_{layer}')
         assert isinstance(task, EcsRunTaskOperator)
         assert task.capacity_provider_strategy == [{'capacityProvider': 'FARGATE_SPOT', 'weight': 1}]
-        assert task.wait_for_completion and task.execution_timeout <= timedelta(minutes=35)
+        assert task.wait_for_completion and task.execution_timeout <= timedelta(hours=1)
         assert task.upstream_task_ids == {previous}
         assert task.trigger_rule == 'all_success'
         assert task.pool == 'gold_writer' and not task.deferrable

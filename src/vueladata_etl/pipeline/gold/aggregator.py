@@ -51,7 +51,12 @@ class GoldAggregator:
             tables.update(build_star(df, connections))
             overwrite_mode = "dynamic" if self.mode == "daily" else "static"
             for name, table in tables.items():
-                if {"anio", "mes"} <= set(table.columns) and not table.isEmpty():
+                if {"anio", "mes"} <= set(table.columns):
+                    # Only check isEmpty for conditional tables that can be empty (like weather events),
+                    # avoiding 15 redundant full-dataset Spark scans across the 5.8M rows.
+                    if name == "impacto_clima" and table.isEmpty():
+                        table.write.mode("overwrite").option("compression", "snappy").parquet(f"{self.paths.gold_path}/{name}")
+                        continue
                     writer = (table.write.mode("overwrite").option("partitionOverwriteMode", overwrite_mode)
                               .option("compression", "snappy").partitionBy("anio", "mes"))
                     writer.parquet(f"{self.paths.gold_path}/{name}")

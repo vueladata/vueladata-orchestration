@@ -25,7 +25,7 @@ def spark_stage(layer, mode, dag_id):
         wait_for_completion=True,
         # Keep the single-writer pool slot throughout the external job.
         deferrable=False,
-        waiter_delay=15, waiter_max_attempts=140,
-        execution_timeout=timedelta(minutes=35),
+        waiter_delay=15, waiter_max_attempts=240,
+        execution_timeout=timedelta(hours=1),
         aws_conn_id="aws_default", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
     )
