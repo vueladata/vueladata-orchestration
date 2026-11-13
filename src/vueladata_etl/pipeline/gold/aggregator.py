@@ -25,9 +25,9 @@ class GoldAggregator:
             df_flights = df_flights.filter(F.col("fuente") == "F1_KAGGLE")
         df = previous_cause(df_flights)
         df = DelayPropagationEngine.calculate_propagation(OtpRuleEngine.apply_otp_rule(df))
-        # Keep reusable rows in memory with serialized RAM storage (backed by disk if needed)
+        # Keep reusable rows in memory with RAM storage (backed by disk if needed)
         # to maximize throughput across all 16 analytical and dimensional tables.
-        df = df.persist(StorageLevel.MEMORY_AND_DISK_SER)
+        df = df.persist(StorageLevel.MEMORY_AND_DISK)
         try:
             try:
                 connections = self.spark.read.parquet(f"{self.paths.silver_path}/conexiones")
