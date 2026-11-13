@@ -10,18 +10,31 @@ from pyspark.sql import functions as F
 
 def replace_sources(incoming, output, sources, base):
     spark = incoming.sparkSession
-    combined = incoming
     try:
         previous = spark.read.parquet(output)
     except AnalysisException as exc:
         if exc.getErrorClass() != 'PATH_NOT_FOUND':
             raise
-    else:
+        previous = None
+
+    if previous is None or previous.isEmpty():
+        combined = incoming
+        write_mode = "static"
+    elif "F1_KAGGLE" in sources:
+        # Full historical reload: combine and overwrite static
         combined = previous.filter(~F.col('fuente').isin(sources)).unionByName(incoming, allowMissingColumns=True)
+        write_mode = "static"
+    else:
+        # Incremental daily reload: do NOT touch F1_KAGGLE (anio=2015)
+        # Only combine non-Kaggle partitions (anio >= 2026)
+        active_previous = previous.filter((F.col('fuente') != 'F1_KAGGLE') & (~F.col('fuente').isin(sources)))
+        combined = active_previous.unionByName(incoming, allowMissingColumns=True)
+        write_mode = "dynamic"
+
     staging = f'{base}/_etl_staging/{uuid4().hex}'
     combined.write.mode('overwrite').option('compression', 'snappy').parquet(staging)
     staged = spark.read.parquet(staging)
-    writer = staged.write.mode('overwrite').option('partitionOverwriteMode', 'static').option('compression', 'snappy')
+    writer = staged.write.mode('overwrite').option('partitionOverwriteMode', write_mode).option('compression', 'snappy')
     if not staged.isEmpty():
         writer = writer.partitionBy('anio', 'mes')
     writer.parquet(output)

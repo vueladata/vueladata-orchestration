@@ -113,6 +113,16 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_SPARK_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_SPARK_REPO:latest
 
+      - name: Update Spark ECS Task Definition & SSM
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          sed -e "s/\${AWS_ACCOUNT_ID}/$ACCOUNT_ID/g" \
+              -e "s/\${AWS_DEFAULT_REGION}/$AWS_REGION/g" \
+              infrastructure/aws/ecs/task-spark-spot.json > /tmp/task-spark-spot.json
+          NEW_TASK_DEF=$(aws ecs register-task-definition --cli-input-json file:///tmp/task-spark-spot.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "Nueva Task Definition registrada: $NEW_TASK_DEF"
+          aws ssm put-parameter --name "/vueladata/dev/ecs/spark_task_definition" --value "$NEW_TASK_DEF" --type "String" --overwrite
+
       - name: Deploy to Amazon ECS (Rolling Update Airflow Services)
         run: |
           echo "Actualizando servicios de Airflow en el clúster $ECS_CLUSTER..."
