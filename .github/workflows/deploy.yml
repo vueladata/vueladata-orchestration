@@ -139,7 +139,7 @@ jobs:
                   .tags as $tags | .taskDefinition
                   | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                         .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
-                  | .tags = $tags
+                  | if ($tags | length) > 0 then .tags = $tags else . end
                   | (.containerDefinitions[] | select(.image | test("/vueladata/airflow[:@]")) | .image) = $image
                   | if any(.containerDefinitions[]; .image == $image) then . else error("Airflow container not found") end
                 ' > /tmp/task-airflow.json
