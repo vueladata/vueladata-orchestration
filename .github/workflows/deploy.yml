@@ -124,6 +124,8 @@ jobs:
           aws ssm put-parameter --name "/vueladata/dev/ecs/spark_task_definition" --value "$NEW_TASK_DEF" --type "String" --overwrite
 
       - name: Deploy to Amazon ECS (Rolling Update Airflow Services)
+        env:
+          AIRFLOW_IMAGE: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_AIRFLOW_REPO }}:${{ github.sha }}
         run: |
           echo "Actualizando servicios de Airflow en el clúster $ECS_CLUSTER..."
           AIRFLOW_SERVICES=("vueladata-airflow-scheduler" "vueladata-airflow-webserver" "vueladata-airflow-worker")
@@ -131,8 +133,18 @@ jobs:
           for SERVICE in "${AIRFLOW_SERVICES[@]}"; do
             STATUS=$(aws ecs describe-services --cluster $ECS_CLUSTER --services $SERVICE --query 'services[0].status' --output text 2>/dev/null || echo "MISSING")
             if [ "$STATUS" == "ACTIVE" ]; then
-              echo ">>> Actualizando servicio en caliente: $SERVICE"
-              aws ecs update-service --cluster $ECS_CLUSTER --service $SERVICE --force-new-deployment
+              CURRENT_TASK_DEF=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$SERVICE" --query 'services[0].taskDefinition' --output text)
+              aws ecs describe-task-definition --task-definition "$CURRENT_TASK_DEF" --include TAGS --output json |
+                jq --arg image "$AIRFLOW_IMAGE" '
+                  .tags as $tags | .taskDefinition
+                  | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                        .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+                  | .tags = $tags
+                  | (.containerDefinitions[] | select(.image | test("/vueladata/airflow[:@]")) | .image) = $image
+                  | if any(.containerDefinitions[]; .image == $image) then . else error("Airflow container not found") end
+                ' > /tmp/task-airflow.json
+              NEW_TASK_DEF=$(aws ecs register-task-definition --cli-input-json file:///tmp/task-airflow.json --query 'taskDefinition.taskDefinitionArn' --output text)
+              aws ecs update-service --cluster "$ECS_CLUSTER" --service "$SERVICE" --task-definition "$NEW_TASK_DEF" --query 'service.taskDefinition' --output text
             else
               echo ">>> Aviso: Servicio $SERVICE no está activo en ECS (estado: $STATUS), omitiendo."
             fi

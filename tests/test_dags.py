@@ -56,7 +56,11 @@ def test_spark_templates(bag, name):
         task = dag.get_task(f'procesar_{layer}')
         assert isinstance(task, EcsRunTaskOperator)
         assert task.capacity_provider_strategy == [{'capacityProvider': 'FARGATE_SPOT', 'weight': 1}]
-        assert task.wait_for_completion and task.execution_timeout <= timedelta(hours=1)
+        historical_gold = name == 'dag_f1_historico_spark' and layer == 'gold'
+        assert task.wait_for_completion
+        assert task.reattach is historical_gold
+        assert task.execution_timeout == timedelta(minutes=100 if historical_gold else 60)
+        assert task.waiter_delay * task.waiter_max_attempts == (5400 if historical_gold else 3600)
         assert task.upstream_task_ids == {previous}
         assert task.trigger_rule == 'all_success'
         assert task.pool == 'gold_writer' and not task.deferrable

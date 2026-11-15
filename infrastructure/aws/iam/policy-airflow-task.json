@@ -20,6 +20,7 @@
       "Effect": "Allow",
       "Action": [
         "ecs:RunTask",
+        "ecs:ListTasks",
         "ecs:StopTask",
         "ecs:DescribeTasks"
       ],

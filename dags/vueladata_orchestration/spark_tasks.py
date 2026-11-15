@@ -6,6 +6,7 @@ from airflow.providers.amazon.aws.operators.ecs import EcsRunTaskOperator
 
 
 def spark_stage(layer, mode, dag_id):
+    historical_gold = layer == "gold" and mode == "historical"
     return EcsRunTaskOperator(
         task_id=f"procesar_{layer}",
         cluster="{{ ti.xcom_pull(task_ids='validar_entorno')['cluster'] }}",
@@ -25,7 +26,10 @@ def spark_stage(layer, mode, dag_id):
         wait_for_completion=True,
         # Keep the single-writer pool slot throughout the external job.
         deferrable=False,
-        waiter_delay=15, waiter_max_attempts=240,
-        execution_timeout=timedelta(hours=1),
+        # Recover the same ECS task if Airflow retries while it is still running.
+        reattach=historical_gold,
+        waiter_delay=15,
+        waiter_max_attempts=360 if historical_gold else 240,
+        execution_timeout=timedelta(minutes=100 if historical_gold else 60),
         aws_conn_id="aws_default", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
     )
