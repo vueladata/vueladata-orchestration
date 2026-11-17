@@ -28,12 +28,9 @@ class HistoricalGoldPublication:
         for name in tables:
             source = f"{self.snapshot}/{name}/"
             target = f"{self.gold_prefix}/{name}/"
-            keys = set(self._keys(source))
-            data = sorted(
-                key.removeprefix(source) for key in keys
-                if key.endswith(".parquet") and not key.removeprefix(source).startswith("_")
-            )
-            if f"{source}_SUCCESS" not in keys or not data:
+            relative_keys = {key[len(source):] for key in self._keys(source)}
+            data = sorted(key for key in relative_keys if key.endswith(".parquet") and not key.startswith("_"))
+            if "_SUCCESS" not in relative_keys or not data:
                 raise RuntimeError(f"Gold snapshot is incomplete: {name}")
             plans.append((source, target, data))
 
