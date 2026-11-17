@@ -58,7 +58,8 @@ def test_spark_templates(bag, name):
         assert task.capacity_provider_strategy == [{'capacityProvider': 'FARGATE_SPOT', 'weight': 1}]
         historical_gold = name == 'dag_f1_historico_spark' and layer == 'gold'
         assert task.wait_for_completion
-        assert task.reattach is historical_gold
+        assert not task.reattach
+        assert task.retries == (0 if historical_gold else dag.default_args['retries'])
         assert task.execution_timeout == timedelta(minutes=100 if historical_gold else 60)
         assert task.waiter_delay * task.waiter_max_attempts == (5400 if historical_gold else 3600)
         assert task.upstream_task_ids == {previous}
@@ -69,6 +70,8 @@ def test_spark_templates(bag, name):
         assert task.cluster == config['cluster']
         assert task.network_configuration == config['network']
         command = task.overrides['containerOverrides'][0]['command']
+        environment = task.overrides['containerOverrides'][0].get('environment', [])
+        assert environment == ([{'name': 'SPARK_MASTER', 'value': 'local[4]'}] if historical_gold else [])
         assert command[command.index('--layer') + 1] == layer
         assert command[command.index('--date') + 1] == '2026-11-07'
         assert 'test-bucket' in command

@@ -1,4 +1,6 @@
 """Publish the seven immutable BI datasets plus additive star-schema tables."""
+from time import monotonic
+
 from pyspark import StorageLevel
 from pyspark.sql import functions as F
 from vueladata_etl.pipeline.gold.business_rules import previous_cause
@@ -10,6 +12,7 @@ from vueladata_etl.pipeline.gold.rules_compensations import CompensationRuleEngi
 from vueladata_etl.pipeline.gold.rules_connections import ConnectionsRuleEngine
 from vueladata_etl.pipeline.gold.rules_weather import WeatherRuleEngine
 from vueladata_etl.pipeline.gold.star import build_star
+from vueladata_etl.pipeline.gold.publication import HistoricalGoldPublication
 
 
 class GoldAggregator:
@@ -49,6 +52,10 @@ class GoldAggregator:
                     "impacto_clima": WeatherRuleEngine.aggregate_kpi_clima(df),
                 }
             tables.update(build_star(df, connections))
+            if self.mode == "historical" and not only_star_model and self.paths.gold_path.startswith("s3a://"):
+                self._publish_historical(tables)
+                return df
+
             overwrite_mode = "dynamic" if self.mode == "daily" else "static"
             for name, table in tables.items():
                 if {"anio", "mes"} <= set(table.columns) and not table.isEmpty():
@@ -66,3 +73,30 @@ class GoldAggregator:
             return df
         finally:
             df.unpersist()
+
+    def _publish_historical(self, tables):
+        publication = HistoricalGoldPublication(self.paths.gold_path)
+        for name, table in tables.items():
+            start = monotonic()
+            partitioned = {"anio", "mes"} <= set(table.columns)
+            if partitioned:
+                partitioned = not table.isEmpty()
+            if name == "fact_vuelos" and not partitioned:
+                raise ValueError("Historical Gold has no F1 flights to publish")
+            if partitioned:
+                # Keep each month in one write task and cap file size by row count.
+                table = table.repartition(24, "anio", "mes")
+            elif name.startswith("dim_"):
+                table = table.coalesce(1)
+            writer = (table.write.mode("error")
+                      .option("mapreduce.fileoutputcommitter.algorithm.version", "2")
+                      .option("mapreduce.fileoutputcommitter.marksuccessfuljobs", "true")
+                      .option("maxRecordsPerFile", 250000)
+                      .option("compression", "snappy"))
+            if partitioned:
+                writer = writer.partitionBy("anio", "mes")
+            writer.parquet(f"{publication.path}/{name}")
+            print(f"[Gold] Staged {name} in {monotonic() - start:.1f}s", flush=True)
+        start = monotonic()
+        publication.publish(tables)
+        print(f"[Gold] Promoted historical snapshot in {monotonic() - start:.1f}s", flush=True)

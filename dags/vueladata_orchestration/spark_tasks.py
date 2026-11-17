@@ -15,6 +15,7 @@ def spark_stage(layer, mode, dag_id):
         network_configuration="{{ ti.xcom_pull(task_ids='validar_entorno')['network'] }}",
         overrides={"containerOverrides": [{
             "name": "{{ ti.xcom_pull(task_ids='validar_entorno')['container'] }}",
+            **({"environment": [{"name": "SPARK_MASTER", "value": "local[4]"}]} if historical_gold else {}),
             "command": ["--layer", layer, "--mode", mode, "--bucket",
                         "{{ ti.xcom_pull(task_ids='validar_entorno')['bucket'] }}",
                         "--date", "{{ dag_run.conf.get('date') or (dag_run.logical_date or dag_run.start_date).strftime('%Y-%m-%d') }}",
@@ -26,8 +27,8 @@ def spark_stage(layer, mode, dag_id):
         wait_for_completion=True,
         # Keep the single-writer pool slot throughout the external job.
         deferrable=False,
-        # Recover the same ECS task if Airflow retries while it is still running.
-        reattach=historical_gold,
+        # The task role cannot list ECS tasks. A retry could launch a second writer.
+        **({"retries": 0} if historical_gold else {}),
         waiter_delay=15,
         waiter_max_attempts=360 if historical_gold else 240,
         execution_timeout=timedelta(minutes=100 if historical_gold else 60),
