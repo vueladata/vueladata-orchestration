@@ -1,6 +1,6 @@
 # Registro aditivo y validación analítica
 
-Preparado mediante inspección de solo lectura. Ninguna consulta fue ejecutada en AWS.
+La revisión de Glue del 20 de noviembre de 2026 encontró los siete conjuntos de Power BI y las nueve tablas del modelo estrella en `vueladata_gold_db`. La inspección consultó metadatos de Glue.
 `registrar_modelo_estrella.sql` crea únicamente seis dimensiones y tres hechos
 adicionales en `vueladata_gold_db`. No modifica los siete cubos de Power BI.
 Los tipos y particiones corresponden a `pipeline/gold/star.py` y `aggregator.py`.
@@ -8,8 +8,7 @@ Los tipos y particiones corresponden a `pipeline/gold/star.py` y `aggregator.py`
 ## Antes de ejecutar
 
 1. Obtener aprobación para las escrituras en Glue y resultados de Athena.
-2. Publicar y verificar los Parquet de las nueve tablas nuevas. Hoy no existen
-   sus prefijos en el bucket inspeccionado. Usar `--only-star-model` para leer
+2. Verificar los Parquet y los prefijos de las nueve tablas en el bucket de destino antes de registrar o reconstruir el modelo. Usar `--only-star-model` para leer
    Silver existente y escribir exclusivamente las nueve tablas nuevas. Este modo
    omite Bronze, Silver y toda conexión/carga/auditoría RDS; rechaza `--sync-rds`.
    Ejemplo de argumentos del contenedor: `--bucket <bucket> --only-star-model`.

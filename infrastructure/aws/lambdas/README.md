@@ -29,8 +29,8 @@ copias de estos archivos, pero el código que se revisa en Git está aquí.
 
 ## Workers y despliegue coordinado
 
-Los cambios correspondientes de `vueladata-api` son necesarios antes de encender
-los consumidores. Worker RDS enruta por event_type, resuelve el ICAO24 con el
+Los handlers de F2/F3 están en la rama principal de `vueladata-api`. La imagen
+de los consumidores debe incluir esa versión. Worker RDS enruta por event_type, resuelve el ICAO24 con el
 catálogo aeronave y el IATA con aeropuerto. Los eventos sin catálogo se transfieren
 con confirmación a `q.rds_unresolved` para posterior corrección y replay, en lugar
 de asignarlos a aeronave 1. Debe cargarse el catálogo real antes de esperar que
@@ -55,7 +55,7 @@ Variables requeridas: `S3_BUCKET`, `RABBITMQ_HOST`, `RABBITMQ_PORT`,
 `RABBITMQ_USER`, `RABBITMQ_PASSWORD`, `RABBITMQ_QUEUE_DL`, `RABBITMQ_QUEUE_RDS`,
 `ECS_CLUSTER`, `RABBITMQ_SERVICE`. Las credenciales se suministran desde SSM al
 desplegar, sin guardarlas en el ZIP o Git. No hay contraseñas por defecto.
-Ambas funciones usan las mismas dos subredes privadas y SG que Open-Meteo.
+Ambas funciones comparten las dos subredes privadas y el grupo de seguridad configurados para la ingesta.
 
 Permisos: acceso VPC/ENI, `ecs:DescribeServices` limitado al servicio RabbitMQ,
 ListBucket limitado al prefijo propio y Get/PutObject/Get/PutObjectTagging en

@@ -1,153 +1,35 @@
-# VuelaData - Orquestación con Airflow 3.x y Lakehouse Medallion con Spark
+# Orquestación de VuelaData con Airflow y Spark
 
-Este repositorio contiene la arquitectura de orquestación analítica y procesamiento de datos para la plataforma **VuelaData**, integrando **Apache Airflow 3.1.5** (ejecución distribuida con Celery y RabbitMQ en AWS ECS Fargate) y **Apache Spark 3.5.1** (tareas efímeras Medallion en Fargate Spot).
+Airflow 3.1.5 usa CeleryExecutor con RabbitMQ. Ejecuta Apache Spark 3.5.1 en tareas efímeras de ECS Fargate Spot para transformar los datos de Bronze a Silver y Gold. [Arquitectura, ADR y accesos de AWS](https://vueladata.github.io/documentacion/docs/).
 
----
+| DAG | Schedule y etapas |
+| --- | --- |
+| `dag_daily_batch_spark` | 03:00 UTC. Valida los prefijos de entrada y ejecuta Bronze → Silver → Gold. |
+| `dag_f1_historico_spark` | Manual. Valida el F1 histórico y F6 en Bronze, luego ejecuta Silver → Gold. |
+| `hu11_prueba_celery` | Prueba manual de ejecución distribuida en Celery. |
 
-## 1. Arquitectura Limpia y Estructura del Proyecto
+EventBridge programa OpenSky cada cinco minutos y Open-Meteo cada quince. Las funciones y su contrato están en [infrastructure/aws/lambdas](infrastructure/aws/lambdas/README.md).
 
-El proyecto sigue los principios de **Clean Architecture** y el patrón **Medallion Lakehouse**, desacoplando responsabilidades (Single Responsibility Principle - SRP):
+## Desarrollo con Docker Compose
 
-```
-vueladata-airflow/
-├── dags/                                      # Orquestadores de flujo (Airflow 3.x)
-│   ├── dag_daily_batch_spark.py               # Lote diario madrugada (@daily)
-│   ├── dag_f1_historico_spark.py              # Lote bajo demanda Kaggle 5.8M vuelos
-│   ├── dag_ingesta_externa_lambdas.py         # Orquestación de Lambdas OpenSky/OpenMeteo
-│   └── hu11_prueba_celery.py                  # Validación de CeleryExecutor distribuido
-│
-├── src/                                       # Código fuente del Motor Analítico (PySpark)
-│   └── vueladata_etl/
-│       ├── core/                              # Dominio y configuraciones compartidas
-│       │   ├── config.py                      # Fábrica SparkSession y rutas S3/Local
-│       │   ├── constants.py                   # Reglas de negocio (OTP <= 15m, Turnaround 45m/60m)
-│       │   └── schemas/                       # Esquemas explícitos StructType (HU-12)
-│       │       ├── f1_schemas.py              # Esquemas Kaggle (flights, airlines, airports)
-│       │       ├── f6_schemas.py              # Esquemas Rotación (itinerary, fleet, routes)
-│       │       └── event_schemas.py           # Esquemas Worker Lake (OOOI, pagos, clima, opensky)
-│       │
-│       ├── pipeline/                          # Etapas desacopladas del pipeline Medallion
-│       │   ├── bronze/                        # CAPA BRONZE: Ingesta y lectura tipada en bruto
-│       │   │   ├── reader.py                  # Lector con esquemas explícitos sin inferencia
-│       │   │   └── validator.py               # Validador de existencia y precondiciones
-│       │   ├── silver/                        # CAPA SILVER: Limpieza, estandarización y curaduría
-│       │   │   ├── cleaner_flights.py         # Normalización y tipado de vuelos F1 y F6
-│       │   │   ├── cleaner_events.py          # Tipado de eventos OOOI, pagos y clima
-│       │   │   └── transformer.py             # Persistencia de datasets limpios en Parquet
-│       │   └── gold/                          # CAPA GOLD: Reglas de negocio y analítica
-│       │       ├── rules_otp.py               # Motor de regla RN-01 (Puntualidad OTP <= 15 min)
-│       │       ├── rules_propagation.py       # Motor de regla RN-08 (Propagación retrasos en flota)
-│       │       └── aggregator.py              # Persistencia de métricas y KPIs en Parquet
-│       │
-│       └── main.py                            # CLI de ejecución del pipeline (--layer, --mode)
-│
-├── infrastructure/                            # Infraestructura como Código y Despliegue
-│   ├── docker/
-│   │   ├── airflow/
-│   │   │   └── Dockerfile                     # Imagen Airflow 3.1.5 + Celery + Amazon Providers
-│   │   └── spark/
-│   │       ├── Dockerfile                     # Imagen PySpark 3.5.1 + Conectores S3A Hadoop
-│   │       ├── entrypoint.sh                  # Entrypoint efímero para Fargate Spot
-│   │       └── requirements.txt               # Dependencias Python mínimas (sin pandas)
-│   └── aws/
-│       ├── ecs/                               # ECS Task Definitions (Fargate & Fargate Spot)
-│       │   ├── task-airflow-webserver.json
-│       │   ├── task-airflow-scheduler.json
-│       │   ├── task-airflow-worker.json
-│       │   ├── task-rabbitmq.json
-│       │   └── task-spark-spot.json
-│       ├── iam/                               # Políticas de permisos IAM
-│       │   └── policy-airflow-task.json
-│       ├── rds/                               # Scripts SQL para PostgreSQL RDS
-│       │   └── init_airflow_db_schema.sql     # Esquema aislado 'airflow_db'
-│       └── scripts/                           # Automatizaciones en Bash y PowerShell
-│           ├── build_and_push_ecr.ps1
-│           ├── deploy_ecs_services.ps1
-│           └── upload_bronze_datasets.ps1
-│
-├── docker-compose.yml                         # Entorno de pruebas local Airflow 3 distribuido
-├── .env.example                               # Plantilla de variables de entorno
-└── requirements.txt                           # Dependencias raíz para Airflow
+Clona `vueladata-api` y `vueladata-stream` junto a este repositorio porque Compose usa esos directorios como contextos de construcción. Crea `.env` a partir de `.env.example` y configura contraseñas, claves de Airflow y, si se probará correo, el buzón de pruebas. Revisa la configuración y arranca desde la raíz.
+
+```bash
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
 ```
 
----
+La API usa el puerto 8000, Airflow el 8080 y el panel RabbitMQ el 15672. El puerto local PostgreSQL lo controla `POSTGRES_PORT`. Aplica el esquema operacional en el PostgreSQL local antes de usar las rutas de negocio o los workers. El Compose inicializa `airflow_db`; el esquema de negocio y el seed se documentan en [vueladata-database](https://github.com/vueladata/vueladata-database). Para detener el entorno, ejecuta `docker compose down`. El Compose permite probar el stack local. Los DAGs ETL requieren acceso AWS y las definiciones de Spark correspondientes.
 
-## 2. Responsabilidades por Capas (Medallion)
+## Operación en AWS
 
-1. **Bronze (`src/vueladata_etl/pipeline/bronze/`)**:
-   - Lectura exclusiva desde `s3a://.../bronze/` aplicando esquemas tipados (`StructType`).
-   - Prohibida la inferencia de tipos (`inferSchema=False`) para optimizar velocidad y memoria.
-2. **Silver (`src/vueladata_etl/pipeline/silver/`)**:
-   - Limpieza, filtrado de anomalías, normalización de columnas (Kaggle inglés -> VuelaData español).
-   - Conversión de fechas/horas a `TimestampType`, deduplicación de eventos por ID idempotente.
-   - Persistencia en `s3a://.../silver/` en formato Parquet comprimido con Snappy.
-3. **Gold (`src/vueladata_etl/pipeline/gold/`)**:
-   - **Regla RN-01**: Cálculo de puntualidad OTP (retraso llegada $\le 15$ min en vuelos operados).
-   - **Regla RN-08**: Cálculo de propagación y efecto dominó en rotación de flota restando tiempo mínimo de escala (45 min nacional / 60 min internacional).
-   - Persistencia en `s3a://.../gold/` en formato Parquet particionado.
+El diario comparte fecha y `run_id` entre tareas. El pool `gold_writer` debe tener un slot. La espera de Gold consume ese slot hasta que termina ECS. Gold histórico deshabilita el reintento automático para evitar lanzar un segundo escritor y compacta los archivos en staging antes de publicarlos. El worker Airflow usa concurrencia y prefetch de uno. La definición versionada de Spark asigna 4 vCPU y 16 GiB.
 
+Las opciones del ETL se encuentran en [src/vueladata_etl/main.py](src/vueladata_etl/main.py). Usa `--mode daily|historical|all` y `--layer bronze|silver|gold|all`. `--date` define la fecha diaria y `--bucket` o `S3_DATA_LAKE_BUCKET` establece el Data Lake. Bronze diario exporta un snapshot fechado de RDS, Silver cura datos y separa registros inválidos, y Gold publica Parquet. El diario reemplaza las particiones afectadas. La publicación `--only-star-model` reutiliza Silver para escribir nueve tablas estrella sin tocar los siete conjuntos de Power BI. La copia opcional en RDS se habilita con `--sync-rds` fuera del modo de solo estrella.
 
-## Configuración y validación
+Consulta el [contrato de Gold](tests/spark/gold_contract.json) y las [instrucciones de Athena y CT-10](infrastructure/aws/athena/README.md). El workflow de despliegue construye imágenes y actualiza ECS al recibir pushes a las ramas configuradas.
 
-Completar los secretos de `.env.example` para ejecución local. En AWS, aprovisionar los parámetros `/vueladata/dev/` referenciados en `secrets` de las Task Definitions antes del despliegue; las conexiones de metadatos de Airflow deben apuntar a la base `airflow_db`.
+## Validación
 
-El CI ejecuta pytest con Airflow 3.1.5. Los resultados en `reports/` son temporales y están excluidos de Git y del contexto Docker.
-
-
-## Contrato Gold y ejecución del ETL
-
-Las siete tablas existentes de Power BI conservan sus nombres y tipos. Las pruebas
-`tests/spark/gold_contract.json` fijan su contrato anterior. Se agregan nueve salidas:
-`dim_fecha`, `dim_aeropuerto`, `dim_aerolinea`, `dim_aeronave`, `dim_causa`, `dim_ruta`,
-`fact_vuelos`, `fact_compensaciones` y `fact_conexiones`.
-
-Columnas adicionales en las tablas existentes:
-- `total_vuelos_sin_hora_llegada` en ambas tablas de puntualidad.
-- `total_vuelos_sin_valoracion` en `costos_compensacion`.
-- `total_conexiones_en_riesgo` en `conexiones_hubs`.
-- `total_vuelos_requieren_auditoria` en `impacto_clima`.
-
-El job diario extrae snapshots operacionales completos, preserva el histórico F1 en
-Silver y reconstruye Gold para no reemplazar un mes con un solo día ni conservar
-métricas obsoletas. Los IDs DOT sin correspondencia IATA y los aeropuertos sin zona
-horaria quedan en cuarentena Silver; no se inventan equivalencias. F1 no contiene
-reservas ni tarifas: los importes desconocidos permanecen nulos. Los costos COP no
-suman otras monedas. Los hechos de compensaciones tienen granularidad de vuelo y
-suma de tarifas de segmentos, no representan pagos efectuados.
-
-Antes de activar los DAGs en un ambiente existente, ejecutar:
-`airflow pools set gold_writer 1 "Single writer for Silver and Gold"`.
-Los contenedores init actualizados también crean este pool. Todos los escritores
-manuales deben respetar la exclusión mutua: Parquet sobre S3 no ofrece publicación
-transaccional de las dieciséis tablas. Una publicación fallida requiere reejecutar
-el lote antes de consumir resultados.
-
-La línea temporal del generador F6 se interpreta como UTC (`F6_TIMEZONE=UTC`).
-El ETL conserva las horas locales separadas de los timestamps UTC. La copia a RDS
-es opcional mediante `--sync-rds` y rechaza exportaciones superiores a 10.000 filas;
-ya no carga silenciosamente una muestra de 5.000 registros. El SLA de menos de
-30 minutos requiere medición en AWS con F1 completo; las pruebas locales no lo certifican.
-
-El CI ejecuta `tests/spark/` en Spark 3.5.1 y las pruebas Airflow por separado.
-Los reportes temporales permanecen excluidos de Git y Docker.
-# Separación de etapas y recursos (noviembre 2026)
-
-El batch diario ejecuta `validar_entorno → procesar_bronze → procesar_silver → procesar_gold`.
-Cada etapa Spark es una tarea ECS independiente y consume la salida persistida de la anterior.
-El histórico valida sus CSV Bronze existentes y ejecuta `procesar_silver → procesar_gold`.
-Reintentar Gold no vuelve a extraer RDS ni a transformar Silver. Todas las tareas usan
-la misma fecha de proceso y el mismo run_id de Airflow.
-
-El pool `gold_writer` debe tener **un slot**: protege las escrituras Silver/Gold
-compartidas entre el batch diario y el histórico. Se mantiene `deferrable=False`
-para conservar ese slot durante toda la tarea ECS; no activar deferral sin incluir
-las tareas diferidas en el pool. El worker de 1 vCPU/2 GB usa concurrencia **1** y
-prefetch **1**, evitando el valor predeterminado de 16 procesos que produjo OOM.
-
-Spark mantiene 2 vCPU/4 GiB: `local[2]`, 64 particiones de shuffle y coalescencia
-adaptativa desactivada para no reagrupar el histórico en particiones grandes.
-Gold conserva su caché reutilizable en disco (`DISK_ONLY`); el snapshot completo
-con ocho particiones y caché en memoria agotaba el heap durante las ventanas.
-
-El DAG de Lambdas se conserva sin cambios. EventBridge sigue siendo el programador
-de ingesta continua; su pausa en Airflow es una decisión operativa separada.
+El workflow ejecuta las pruebas de DAGs, despliegue y Spark con las versiones de runtime declaradas. Los detalles de la ejecución están en [.github/workflows/deploy.yml](.github/workflows/deploy.yml). Las pruebas de Lambdas están en [tests/lambdas](tests/lambdas/).
